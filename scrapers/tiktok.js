@@ -39,6 +39,83 @@
       return this.visible('[data-e2e="search-user-input"], input[type="search"], [role="search"] input, input[placeholder*="Search" i], input[placeholder*="Поиск" i]');
     }
 
+    isVideosRoute() {
+      return /^\/search\/video(?:\/|$)/i.test(location.pathname);
+    }
+
+    isVideosTabSelected(element) {
+      if (this.isVideosRoute()) return true;
+      const control = element?.closest('[role="tab"], a, button, [role="button"]') || element;
+      if (!control) return false;
+      const selectedValues = [
+        control.getAttribute('aria-selected'),
+        control.getAttribute('aria-current'),
+        control.getAttribute('data-state'),
+        control.getAttribute('data-active')
+      ].map(app.utils.normalizeText);
+      return selectedValues.some((value) => /^(true|page|active|selected)$/.test(value));
+    }
+
+    videosTab() {
+      const patterns = [/^videos$/, /^video$/, /^видео$/];
+      const candidates = this.allVisible('[role="tab"], a[href*="/search/video"], button, [role="button"]');
+      return candidates.find((element) => {
+        const label = app.utils.normalizeText(`${element.getAttribute('aria-label') || ''} ${this.text(element)}`);
+        if (label.length > 80 || !patterns.some((pattern) => pattern.test(label))) return false;
+        const href = element.closest('a')?.getAttribute('href') || '';
+        return !href || /\/search\/video(?:[/?#]|$)/i.test(href);
+      }) || null;
+    }
+
+    async switchToVideosTab(keyword, ctx) {
+      await ctx.logger.info('[tiktok] Search results opened', location.href);
+      if (this.isVideosRoute()) {
+        await ctx.logger.info('[tiktok] Videos tab confirmed', 'URL already points to /search/video');
+        return { success: true };
+      }
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        ctx.token.throwIfCancelled();
+        await ctx.logger.info('[tiktok] Looking for Videos tab', `attempt=${attempt}/3`);
+        const tab = this.videosTab();
+        if (!tab) {
+          await ctx.logger.warn('[tiktok] Videos tab was not found', `attempt=${attempt}/3`);
+          await app.utils.sleep(app.utils.randomInt(900, 1500), ctx.token);
+          continue;
+        }
+        if (this.isVideosTabSelected(tab)) {
+          await ctx.logger.info('[tiktok] Videos tab confirmed', 'tab is already selected');
+          return { success: true };
+        }
+
+        await ctx.logger.info('[tiktok] Click: TikTok Videos tab', `attempt=${attempt}/3`);
+        const clicked = await ctx.navigation.click(tab, 'TikTok Videos tab');
+        if (clicked) {
+          const confirmed = await app.utils.waitFor(() => {
+            const currentTab = this.videosTab();
+            return this.isVideosRoute() || this.isVideosTabSelected(currentTab);
+          }, { timeoutMs: 5000, intervalMs: 250, token: ctx.token });
+          if (confirmed) {
+            await ctx.logger.info('[tiktok] Videos tab confirmed', location.href);
+            return { success: true };
+          }
+        }
+        await ctx.logger.warn('[tiktok] Videos tab click was not confirmed', `attempt=${attempt}/3`);
+        await app.utils.sleep(app.utils.randomInt(900, 1500), ctx.token);
+      }
+
+      await ctx.logger.warn('[tiktok] Videos tab UI attempts failed; waiting before URL fallback');
+      await app.utils.sleep(5000, ctx.token);
+      if (this.isVideosRoute()) {
+        await ctx.logger.info('[tiktok] Videos tab confirmed', 'route changed during fallback delay');
+        return { success: true };
+      }
+      const fallbackUrl = `https://www.tiktok.com/search/video?q=${encodeURIComponent(keyword)}`;
+      await ctx.logger.warn(`[tiktok] Using last-resort Videos URL fallback: ${fallbackUrl}`);
+      window.location.assign(fallbackUrl);
+      return { success: false, fallback: true, navigating: true };
+    }
+
     async search(keyword, ctx) {
       if (!(location.pathname.includes('/search') && this.currentQuery() === app.utils.normalizeText(keyword))) {
         const result = await ctx.navigation.search({
@@ -60,13 +137,8 @@
       } else {
         await ctx.logger.info('Existing TikTok results match keyword');
       }
-      if (!location.pathname.includes('/search/video')) {
-        const videosTab = this.findTextControl([/^videos$/, /^video$/, /^видео$/]);
-        if (videosTab) {
-          await ctx.navigation.click(videosTab, 'TikTok Videos tab');
-          await app.utils.waitFor(() => location.pathname.includes('/search/video') || document.querySelector('a[href*="/video/"]'), { timeoutMs: 5000, token: ctx.token });
-        }
-      }
+      const videosResult = await this.switchToVideosTab(keyword, ctx);
+      if (videosResult.navigating) return videosResult;
       await this.tryFreshUi(ctx);
       return { success: true };
     }

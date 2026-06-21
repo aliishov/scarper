@@ -39,6 +39,12 @@ assert.match(instagramSource, /Instagram waiting for search input/);
 assert.match(instagramSource, /collectCarouselMedia/);
 assert.match(instagramSource, /source\[src\]/);
 assert.match(instagramSource, /Instagram carousel slide changed/);
+const tiktokSource = fs.readFileSync(path.join(root, 'scrapers', 'tiktok.js'), 'utf8');
+assert.match(tiktokSource, /switchToVideosTab/);
+assert.match(tiktokSource, /Looking for Videos tab/);
+assert.match(tiktokSource, /Videos tab confirmed/);
+assert.match(tiktokSource, /for \(let attempt = 1; attempt <= 3; attempt\+\+\)/);
+assert.doesNotMatch(tiktokSource, /location\.pathname\.includes\('\/search\/video'\) \|\| document\.querySelector\('a\[href\*="\/video\/"\]'\)/);
 assert.equal(globalThis.ScraperApp, undefined);
 
 console.log('Static architecture checks passed');
