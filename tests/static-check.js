@@ -32,6 +32,10 @@ assert.deepEqual(directStateWrites, ['core\\storage.js']);
 const joined = sources.map(([, source]) => source).join('\n');
 for (const leakedToken of ['raulalishov', 'AlexeyMoro', 'Ds7B', '2v7$s4', 'pLYpMK']) assert.equal(joined.includes(leakedToken), false);
 assert.equal(/DOMContentLoaded[^\n]+run|setTimeout\([^\n]+runStateMachine/.test(fs.readFileSync(path.join(root, 'content.js'), 'utf8')), false);
+const instagramSource = fs.readFileSync(path.join(root, 'scrapers', 'instagram.js'), 'utf8');
+assert.match(instagramSource, /svg\[aria-label\]/);
+assert.ok(instagramSource.includes('a[href="/explore/"]'));
+assert.match(instagramSource, /Instagram waiting for search input/);
 assert.equal(globalThis.ScraperApp, undefined);
 
 console.log('Static architecture checks passed');

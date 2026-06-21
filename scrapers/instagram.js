@@ -5,6 +5,7 @@
     constructor() {
       super('instagram');
       this.freshUiConfirmed = false;
+      this.searchOpenAttempt = 0;
     }
 
     async ensureReady(ctx) {
@@ -34,19 +35,47 @@
     }
 
     async openSearch(ctx) {
-      const rawControls = this.allVisible('a, button, [role="button"], svg[aria-label]');
-      const controls = Array.from(new Set(rawControls.map((element) => this.clickable(element)).filter(Boolean)));
-      await ctx.logger.info(`Instagram visible search controls: ${controls.length}`);
-      const control = controls.find((element) => {
-        const labels = [element.getAttribute('aria-label'), this.text(element)].map(app.utils.normalizeText).filter(Boolean);
-        return labels.some((label) => /^(search|поиск|axtarış|axtaris)$/.test(label));
-      });
+      this.searchOpenAttempt++;
+      const attempt = Math.min(this.searchOpenAttempt, 3);
+      let control = null;
+      let strategy = '';
+
+      if (attempt === 1) {
+        const searchSvg = this.allVisible('svg[aria-label], svg').find((svg) => {
+          const labels = [svg.getAttribute('aria-label'), svg.querySelector('title')?.textContent].map(app.utils.normalizeText).filter(Boolean);
+          return labels.some((label) => /^(search|поиск|axtarış|axtaris)$/.test(label));
+        });
+        if (searchSvg) {
+          await ctx.logger.info('Instagram Search icon found by svg aria-label/title');
+          control = searchSvg.closest('a, button, [role="button"], [role="link"]');
+          strategy = 'svg aria-label/title';
+        }
+      } else if (attempt === 2) {
+        control = this.allVisible('a[href="/explore/"], a[href^="/explore"]')
+          .find((link) => link.querySelector('svg') || /search|поиск|axtar/i.test(`${link.getAttribute('aria-label') || ''} ${this.text(link)}`));
+        strategy = 'explore link';
+      } else {
+        const rawControls = this.allVisible('a, button, [role="button"], [role="link"]');
+        control = rawControls.find((element) => {
+          const labels = [element.getAttribute('aria-label'), this.text(element)].map(app.utils.normalizeText).filter(Boolean);
+          return labels.some((label) => /^(search|поиск|axtarış|axtaris)$/.test(label));
+        });
+        strategy = 'visible navigation text';
+      }
+
       if (!control) {
-        await ctx.logger.warn('Instagram Search navigation control was not found');
+        await ctx.logger.warn(`Instagram Search navigation control was not found by ${strategy || `attempt ${attempt}`}`);
         return false;
       }
-      await ctx.logger.info('Instagram Search navigation control found');
-      return ctx.navigation.click(control, 'Instagram Search navigation');
+      const clickable = control.closest?.('a, button, [role="button"], [role="link"]') || control;
+      await ctx.logger.info(`Instagram Search clickable ancestor found: ${clickable.tagName}`, `href=${clickable.getAttribute('href') || 'none'}, strategy=${strategy}`);
+      const clicked = await ctx.navigation.click(clickable, 'Instagram Search navigation');
+      if (!clicked) return false;
+      await ctx.logger.info('Instagram waiting for search input');
+      const input = await app.utils.waitFor(() => this.searchInput(), { timeoutMs: 4500, intervalMs: 250, token: ctx.token });
+      if (input) await ctx.logger.info('Instagram search input found');
+      else await ctx.logger.warn(`Instagram search input did not appear after ${strategy}`);
+      return !!input;
     }
 
     async clickExactSuggestion(keyword, ctx) {
@@ -70,6 +99,7 @@
     }
 
     async search(keyword, ctx) {
+      this.searchOpenAttempt = 0;
       await ctx.logger.info(`Instagram search started: ${keyword}`);
       await ctx.logger.info(`Instagram search input visible before opening UI: ${!!this.searchInput()}`);
       if (!this.resultsMatch(keyword)) {
