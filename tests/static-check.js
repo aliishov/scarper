@@ -60,8 +60,15 @@ assert.match(tiktokSource, /scraperProgress/);
 assert.match(tiktokSource, /Caption selector matched/);
 assert.match(tiktokSource, /text: caption\?\.text \|\| null/);
 assert.doesNotMatch(tiktokSource, /parseCard\(/);
+assert.match(tiktokSource, /openFirstVideoCard/);
+assert.match(tiktokSource, /moveToNextViewerPost/);
+assert.match(tiktokSource, /collectViewerMedia/);
+assert.match(tiktokSource, /ArrowDown/);
+assert.doesNotMatch(tiktokSource, /videoUrls/);
+assert.doesNotMatch(tiktokSource, /assign\(target\.postUrl\)/);
 assert.match(stateMachineSource, /if \(result\?\.navigating\)/);
 assert.match(stateMachineSource, /scraperProgress: null/);
+assert.match(stateMachineSource, /reason !== 'end-of-feed'/);
 assert.equal(globalThis.ScraperApp, undefined);
 
 console.log('Static architecture checks passed');

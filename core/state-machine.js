@@ -187,7 +187,8 @@
 
     async advanceKeyword(state, logger, reason) {
       const nextIndex = state.keywordIndex + 1;
-      if (nextIndex < state.keywords.length || state.infiniteLoop) {
+      const restartInfiniteKeywords = state.infiniteLoop && reason !== 'end-of-feed';
+      if (nextIndex < state.keywords.length || restartInfiniteKeywords) {
         const keywordIndex = nextIndex < state.keywords.length ? nextIndex : 0;
         const currentKeyword = state.keywords[keywordIndex];
         await logger.info(`Moving to next keyword: ${currentKeyword}`, reason);
