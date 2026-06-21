@@ -36,6 +36,9 @@ const instagramSource = fs.readFileSync(path.join(root, 'scrapers', 'instagram.j
 assert.match(instagramSource, /svg\[aria-label\]/);
 assert.ok(instagramSource.includes('a[href="/explore/"]'));
 assert.match(instagramSource, /Instagram waiting for search input/);
+assert.match(instagramSource, /collectCarouselMedia/);
+assert.match(instagramSource, /source\[src\]/);
+assert.match(instagramSource, /Instagram carousel slide changed/);
 assert.equal(globalThis.ScraperApp, undefined);
 
 console.log('Static architecture checks passed');

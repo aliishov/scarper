@@ -228,7 +228,95 @@
       return true;
     }
 
-    parsePost(container, postUrl) {
+    currentSlideMedia(container) {
+      const urls = new Set();
+      const add = (value) => {
+        const url = String(value || '').trim();
+        if (url && !url.startsWith('data:')) urls.add(url);
+      };
+      for (const image of this.allVisible('img[src]', container)) {
+        if (/profile picture|avatar|emoji/i.test(image.alt || '')) continue;
+        const largeEnough = image.width > 120 || image.naturalWidth > 120 || /cdninstagram|fbcdn/i.test(image.currentSrc || image.src || '');
+        if (largeEnough) add(image.currentSrc || image.src || image.getAttribute('src'));
+      }
+      for (const video of this.allVisible('video', container)) {
+        add(video.currentSrc);
+        add(video.src);
+        add(video.getAttribute('src'));
+        add(video.poster);
+        for (const source of video.querySelectorAll('source[src]')) add(source.src || source.getAttribute('src'));
+      }
+      return urls;
+    }
+
+    carouselNextButton(container) {
+      const direct = this.allVisible(
+        'button[aria-label="Next"], button[aria-label="Далее"], button[aria-label="Sonrakı"], [role="button"][aria-label="Next"], [role="button"][aria-label="Далее"], [role="button"][aria-label="Sonrakı"]',
+        container
+      );
+      const svgParents = this.allVisible('svg[aria-label], svg', container)
+        .filter((svg) => {
+          const labels = [svg.getAttribute('aria-label'), svg.querySelector('title')?.textContent].map(app.utils.normalizeText).filter(Boolean);
+          return labels.some((label) => /^(next|далее|sonrakı|sonraki)$/.test(label));
+        })
+        .map((svg) => svg.closest('button, [role="button"]'))
+        .filter(Boolean);
+      const candidates = Array.from(new Set([...direct, ...svgParents])).filter((button) => !button.disabled && button.getAttribute('aria-disabled') !== 'true');
+      if (!candidates.length) return null;
+
+      const media = this.allVisible('img[src], video', container)
+        .filter((element) => element.getBoundingClientRect().width > 160 && element.getBoundingClientRect().height > 160)
+        .sort((left, right) => {
+          const leftRect = left.getBoundingClientRect();
+          const rightRect = right.getBoundingClientRect();
+          return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);
+        })[0];
+      if (!media) return candidates[0];
+      const mediaRect = media.getBoundingClientRect();
+      return candidates.find((button) => {
+        const rect = button.getBoundingClientRect();
+        const centerY = rect.top + rect.height / 2;
+        return centerY >= mediaRect.top && centerY <= mediaRect.bottom && rect.left >= mediaRect.left + mediaRect.width * 0.45 && rect.left <= mediaRect.right + 120;
+      }) || null;
+    }
+
+    async collectCarouselMedia(container, ctx) {
+      const mediaUrls = new Set();
+      const slideFingerprints = new Set();
+      for (let slide = 1; slide <= 20; slide++) {
+        ctx.token.throwIfCancelled();
+        const current = this.currentSlideMedia(container);
+        const fingerprint = Array.from(current).sort().join('|');
+        if (fingerprint && slideFingerprints.has(fingerprint)) {
+          await ctx.logger.warn('Instagram carousel repeated an already processed slide; stopping carousel traversal');
+          break;
+        }
+        if (fingerprint) slideFingerprints.add(fingerprint);
+        const beforeTotal = mediaUrls.size;
+        current.forEach((url) => mediaUrls.add(url));
+        await ctx.logger.info('Instagram media collected from current slide', `slide=${slide}, found=${current.size}, new=${mediaUrls.size - beforeTotal}`);
+
+        const next = this.carouselNextButton(container);
+        if (!next) break;
+        await ctx.logger.info('Instagram carousel next button found', `slide=${slide}`);
+        const beforeFingerprint = fingerprint;
+        const clicked = await ctx.navigation.click(next, 'Instagram carousel Next', { scroll: false });
+        if (!clicked) break;
+        const changed = await app.utils.waitFor(() => {
+          const nextFingerprint = Array.from(this.currentSlideMedia(container)).sort().join('|');
+          return nextFingerprint && nextFingerprint !== beforeFingerprint;
+        }, { timeoutMs: 5000, intervalMs: 250, token: ctx.token });
+        if (!changed) {
+          await ctx.logger.warn('Instagram carousel did not change after Next click');
+          break;
+        }
+        await ctx.logger.info('Instagram carousel slide changed', `nextSlide=${slide + 1}`);
+      }
+      await ctx.logger.info('Instagram total mediaUrls collected', String(mediaUrls.size));
+      return Array.from(mediaUrls);
+    }
+
+    parsePost(container, postUrl, collectedMediaUrls = null) {
       if (this.isAdvertisement(container)) return { advertisement: true };
       const date = this.parsePostDate(container);
       if (!date) return null;
@@ -244,10 +332,7 @@
           return !node.closest('time');
         });
       const text = this.text(captionNodes.sort((left, right) => this.text(right).length - this.text(left).length)[0]);
-      const mediaUrls = [
-        ...Array.from(container.querySelectorAll('img[src]')).filter((image) => !/profile picture/i.test(image.alt || '') && (image.width > 180 || image.naturalWidth > 180)).map((image) => image.currentSrc || image.src),
-        ...Array.from(container.querySelectorAll('video')).map((video) => video.src && !video.src.startsWith('blob:') ? video.src : video.poster)
-      ].filter(Boolean);
+      const mediaUrls = collectedMediaUrls || Array.from(this.currentSlideMedia(container));
       return {
         postDate: app.utils.formatTimestamp(date),
         postUrl,
@@ -293,7 +378,9 @@
           continue;
         }
         await this.expandPostText(container, ctx);
-        const post = this.parsePost(container, candidate.postUrl);
+        const mediaUrls = await this.collectCarouselMedia(container, ctx);
+        if (!mediaUrls.length) await ctx.logger.warn('Instagram media URL was not found; post will still be saved', candidate.postUrl);
+        const post = this.parsePost(container, candidate.postUrl, mediaUrls);
         let outcome = null;
         if (post?.advertisement) {
           await ctx.logger.info('Instagram sponsored post skipped', candidate.postUrl);
