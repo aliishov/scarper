@@ -16,6 +16,19 @@
     }));
   }
 
+  function focusAndCaretState(element, documentRef = document) {
+    const active = documentRef.activeElement === element;
+    const supportsCaret = typeof element?.selectionStart === 'number' && typeof element?.selectionEnd === 'number';
+    const expected = String(element?.value || '').length;
+    return {
+      active,
+      supportsCaret,
+      selectionStart: supportsCaret ? element.selectionStart : null,
+      selectionEnd: supportsCaret ? element.selectionEnd : null,
+      caretAtEnd: !supportsCaret || (element.selectionStart === expected && element.selectionEnd === expected)
+    };
+  }
+
   class Navigation {
     constructor(logger, token) {
       this.logger = logger;
@@ -37,11 +50,34 @@
       return true;
     }
 
+    async ensureFocusedWithCaret(element, label) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        this.token.throwIfCancelled();
+        if (document.activeElement !== element) {
+          await this.logger.info(`Focus attempt ${attempt}/3: ${label}`);
+          await this.click(element, label);
+          element.focus({ preventScroll: true });
+          element.dispatchEvent(new FocusEvent('focus', { bubbles: true, composed: true }));
+        }
+        if (typeof element.setSelectionRange === 'function') {
+          const end = String(element.value || '').length;
+          element.setSelectionRange(end, end);
+        }
+        const state = focusAndCaretState(element);
+        if (state.active && state.caretAtEnd) {
+          await this.logger.info(`Focus and caret confirmed in ${label}`, `caret=${state.selectionStart ?? 'n/a'}`);
+          return true;
+        }
+        await this.logger.warn(`Focus/caret was not confirmed in ${label}`, JSON.stringify(state));
+        await sleep(randomInt(100, 300), this.token);
+      }
+      return false;
+    }
+
     async type(element, text, label = 'search input') {
       this.token.throwIfCancelled();
       await this.click(element, label);
-      element.focus();
-      element.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+      if (!(await this.ensureFocusedWithCaret(element, label))) return false;
       const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
       const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
       if (!setter) throw new Error(`Native value setter unavailable for ${label}`);
@@ -51,6 +87,10 @@
       await this.logger.info(`Typing keyword into ${label}`);
       for (const character of String(text)) {
         this.token.throwIfCancelled();
+        if (document.activeElement !== element) {
+          await this.logger.warn(`Focus was lost while typing in ${label}; restoring it`);
+          if (!(await this.ensureFocusedWithCaret(element, label))) return false;
+        }
         const keyCode = character.length === 1 ? character.toUpperCase().charCodeAt(0) : 0;
         dispatchKey(element, 'keydown', character, `Key${character.toUpperCase()}`, keyCode);
         element.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: character }));
@@ -61,25 +101,36 @@
       }
       element.dispatchEvent(new Event('change', { bubbles: true }));
       await sleep(randomInt(300, 800), this.token);
+      if (String(element.value) !== String(text)) {
+        await this.logger.warn(`Typed value mismatch in ${label}`, `expected="${text}", actual="${element.value}"`);
+        return false;
+      }
+      if (!(await this.ensureFocusedWithCaret(element, label))) return false;
+      await this.logger.info(`Keyword and caret verified in ${label}`, `length=${String(text).length}`);
+      return true;
     }
 
     async pressEnter(element, verify, label = 'search input') {
       this.token.throwIfCancelled();
-      element.focus();
+      if (!(await this.ensureFocusedWithCaret(element, label))) {
+        await this.logger.warn(`Enter cancelled because ${label} is not active`);
+        return false;
+      }
+      const activeInput = document.activeElement;
       await this.logger.info(`Enter pressed in ${label}`);
-      dispatchKey(element, 'keydown', 'Enter', 'Enter', 13);
-      dispatchKey(element, 'keypress', 'Enter', 'Enter', 13);
-      dispatchKey(element, 'keyup', 'Enter', 'Enter', 13);
-      let verified = await waitFor(verify, { timeoutMs: 3500, intervalMs: 250, token: this.token });
-      if (verified) return true;
+      dispatchKey(activeInput, 'keydown', 'Enter', 'Enter', 13);
+      dispatchKey(activeInput, 'keypress', 'Enter', 'Enter', 13);
+      dispatchKey(activeInput, 'keyup', 'Enter', 'Enter', 13);
+      return !!(await waitFor(verify, { timeoutMs: 5000, intervalMs: 250, token: this.token }));
+    }
 
+    async submitForm(element, verify, label) {
       const form = element.closest('form');
       if (!form) return false;
-      await this.logger.warn(`Enter had no confirmed effect in ${label}; submitting its form`);
+      await this.logger.warn(`Submitting search form after UI controls failed: ${label}`);
       if (typeof form.requestSubmit === 'function') form.requestSubmit();
       else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-      verified = await waitFor(verify, { timeoutMs: 3500, intervalMs: 250, token: this.token });
-      return !!verified;
+      return !!(await waitFor(verify, { timeoutMs: 5000, intervalMs: 250, token: this.token }));
     }
 
     async search(options) {
@@ -99,13 +150,23 @@
           continue;
         }
 
-        await this.type(input, options.keyword, `${options.platform} search input`);
+        const typed = await this.type(input, options.keyword, `${options.platform} search input`);
+        if (!typed) {
+          await this.logger.warn(`Typing/focus validation failed on search attempt ${attempt}`);
+          continue;
+        }
         let success = await this.pressEnter(input, options.verify, `${options.platform} search input`);
         if (!success && options.clickSuggestion) {
           await this.logger.warn('Enter was not confirmed; trying an exact UI suggestion');
           success = await options.clickSuggestion(input);
           if (success) success = !!(await waitFor(options.verify, { timeoutMs: 5000, intervalMs: 300, token: this.token }));
         }
+        if (!success && options.clickSearchButton) {
+          await this.logger.warn('Suggestion was not confirmed; trying the visible search button');
+          success = await options.clickSearchButton(input);
+          if (success) success = !!(await waitFor(options.verify, { timeoutMs: 5000, intervalMs: 300, token: this.token }));
+        }
+        if (!success) success = await this.submitForm(input, options.verify, `${options.platform} search input`);
         if (success) {
           await this.logger.info('Search results confirmed through UI');
           return { success: true, fallback: false };
@@ -125,4 +186,5 @@
   }
 
   app.Navigation = Navigation;
+  app.navigationInternals = Object.freeze({ focusAndCaretState });
 })(globalThis.ScraperApp);

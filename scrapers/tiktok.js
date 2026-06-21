@@ -50,7 +50,7 @@
             if (control) await ctx.navigation.click(control, 'TikTok Search');
           },
           verify: () => location.pathname.includes('/search') && this.currentQuery() === app.utils.normalizeText(keyword),
-          clickSuggestion: async () => {
+          clickSearchButton: async () => {
             const button = this.visible('[data-e2e="search-box-button"], form button[type="submit"]');
             return button ? ctx.navigation.click(button, 'TikTok Search submit') : false;
           },

@@ -72,6 +72,10 @@
           openSearch: () => this.openSearch(ctx),
           verify: () => this.resultsMatch(keyword),
           clickSuggestion: () => this.clickExactSuggestion(keyword, ctx),
+          clickSearchButton: async (input) => {
+            const button = input.closest('form')?.querySelector('button[type="submit"]');
+            return button ? ctx.navigation.click(button, 'Instagram search button') : false;
+          },
           fallbackUrl: () => `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(keyword)}`
         });
         if (result.navigating) return result;

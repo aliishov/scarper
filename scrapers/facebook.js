@@ -154,6 +154,11 @@
           },
           verify: () => location.pathname.includes('/search/') && this.currentQuery() === app.utils.normalizeText(keyword),
           clickSuggestion: () => this.clickExactSuggestion(keyword, ctx),
+          clickSearchButton: async (input) => {
+            const formButton = input.closest('form')?.querySelector('button[type="submit"]');
+            const button = formButton || this.visible('button[aria-label*="Search" i], [role="button"][aria-label*="Search" i], button[aria-label*="Поиск" i]');
+            return button ? ctx.navigation.click(button, 'Facebook search button') : false;
+          },
           fallbackUrl: () => `https://www.facebook.com/search/top/?q=${encodeURIComponent(keyword)}`
         });
         if (result.navigating) return result;

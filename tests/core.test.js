@@ -26,6 +26,7 @@ for (const file of [
   'core/namespace.js',
   'core/utils.js',
   'core/storage.js',
+  'core/navigation.js',
   'core/server.js',
   'scrapers/base.js',
   'scrapers/twitter.js',
@@ -146,4 +147,19 @@ test('all platform scrapers implement the shared public contract', () => {
       assert.equal(typeof app.scrapers[platform][method], 'function', `${platform}.${method} must exist`);
     }
   }
+});
+
+test('focus and caret confirmation requires the active input and caret at the end', () => {
+  const input = { value: 'Messi', selectionStart: 5, selectionEnd: 5 };
+  assert.deepEqual(app.navigationInternals.focusAndCaretState(input, { activeElement: input }), {
+    active: true,
+    supportsCaret: true,
+    selectionStart: 5,
+    selectionEnd: 5,
+    caretAtEnd: true
+  });
+  input.selectionStart = 2;
+  input.selectionEnd = 2;
+  assert.equal(app.navigationInternals.focusAndCaretState(input, { activeElement: input }).caretAtEnd, false);
+  assert.equal(app.navigationInternals.focusAndCaretState(input, { activeElement: null }).active, false);
 });

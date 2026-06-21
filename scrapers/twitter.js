@@ -34,6 +34,10 @@
             if (control) await ctx.navigation.click(control, 'X Explore/Search');
           },
           verify: () => location.pathname.includes('/search') && this.currentQuery() === app.utils.normalizeText(keyword),
+          clickSearchButton: async (input) => {
+            const button = input.closest('form')?.querySelector('button[type="submit"], [role="button"][data-testid*="search" i]');
+            return button ? ctx.navigation.click(button, 'X search button') : false;
+          },
           fallbackUrl: () => `https://x.com/search?q=${encodeURIComponent(keyword)}&src=typed_query&f=live`
         });
         if (result.navigating) return result;
