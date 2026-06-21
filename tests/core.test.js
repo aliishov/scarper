@@ -115,6 +115,19 @@ test('posts can retain a null publication date in the public payload', () => {
   assert.equal(app.server.toPayload(normalized).postDate, null);
 });
 
+test('TikTok can retain a null caption without reusing another post text', () => {
+  const normalized = app.utils.normalizePost({
+    postDate: '2026-06-20T10:00:00+04:00',
+    postUrl: 'https://www.tiktok.com/@author/video/1234567890123456789',
+    author: 'author',
+    authorUrl: 'https://www.tiktok.com/@author',
+    text: null,
+    mediaUrls: []
+  }, { keyword: 'test', source: 'tiktok' });
+  assert.equal(normalized.text, null);
+  assert.equal(app.server.toPayload(normalized).text, null);
+});
+
 test('TikTok video snowflake yields a stable publication date', () => {
   const expectedSeconds = Math.floor(new Date('2026-06-17T12:00:00Z').getTime() / 1000);
   const videoId = (BigInt(expectedSeconds) << 32n).toString();
@@ -130,6 +143,14 @@ test('TikTok URL produces a clean author and profile URL', () => {
     authorUrl: 'https://www.tiktok.com/@barca4ever.36',
     videoId: '7370000000000000000'
   });
+});
+
+test('TikTok detail caption cleanup removes page chrome without sharing state', () => {
+  assert.equal(app.parsers.tiktokCaption('Full caption #tag | TikTok', 'author'), 'Full caption #tag');
+  assert.equal(app.parsers.tiktokCaption('12 Likes. TikTok video from User (@author): “Quoted caption #tag”.', 'author'), 'Quoted caption #tag');
+  assert.equal(app.parsers.tiktokCaption('author', 'author'), '');
+  assert.equal(app.parsers.tiktokCaption('TikTok - Make Your Day', 'author'), '');
+  assert.equal(app.parsers.tiktokCaption('A different caption', 'author'), 'A different caption');
 });
 
 test('normalized posts and server payload contain only the required public model', () => {

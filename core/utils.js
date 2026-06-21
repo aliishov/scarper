@@ -193,7 +193,7 @@
       postUrl: rawPost.postUrl || '',
       author: String(rawPost.author || '').trim(),
       authorUrl: rawPost.authorUrl || '',
-      text: String(rawPost.text || '').trim(),
+      text: rawPost.text === null ? null : String(rawPost.text || '').trim(),
       mediaUrls: Array.from(new Set((rawPost.mediaUrls || []).filter(Boolean)))
     };
     post.key = canonicalPostKey(post);

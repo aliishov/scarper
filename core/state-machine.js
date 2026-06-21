@@ -158,6 +158,10 @@
             currentCount: () => currentCount,
             onPost
           });
+          if (result?.navigating) {
+            await logger.info('Detail navigation started; state machine will resume after tab load');
+            return;
+          }
           await logger.info(`Keyword collection finished: ${keyword}`, result?.reason || 'completed');
           await scraper.cleanup();
           state = await app.storage.getState();
@@ -192,13 +196,14 @@
           currentKeyword,
           phase: 'searching',
           requestedAction: null,
+          scraperProgress: null,
           stats: { currentKeyword: 0 }
         });
         return true;
       }
 
       await logger.info('All keywords completed; waiting for the server queue');
-      await app.storage.patch(state.runId, { active: false, phase: 'finalizing', requestedAction: null });
+      await app.storage.patch(state.runId, { active: false, phase: 'finalizing', requestedAction: null, scraperProgress: null });
       await app.downloads.finalize(state.runId, false);
       return false;
     }

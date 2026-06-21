@@ -25,6 +25,19 @@
     } catch (error) { return null; }
   }
 
+  function cleanTikTokCaption(value, author = '') {
+    const raw = String(value || '').replace(/\s+/g, ' ').trim();
+    const quoted = raw.match(/tiktok video from [^:]+:\s*[“"](.+?)[”"]\.?$/i);
+    const text = String(quoted?.[1] || raw)
+      .replace(/\s*(?:[|·]|\s-\s)\s*TikTok(?:\s*[-|].*)?$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const normalized = app.utils.normalizeText(text);
+    if (!normalized || normalized === app.utils.normalizeText(author)) return '';
+    if (/^tiktok(?:\s*[-|:]|$)/i.test(text) || /^make your day/i.test(text)) return '';
+    return text;
+  }
+
   class TikTokScraper extends app.BaseScraper {
     constructor() {
       super('tiktok');
@@ -171,33 +184,127 @@
       return parsed ? { ...parsed, handle: parsed.author } : null;
     }
 
-    cardFor(link) {
-      return link.closest('[data-e2e="search-video-card-v2"], [data-e2e="search_video-item"], article, [class*="DivItemContainer"], [class*="DivVideoItem"]') || link.parentElement;
+    detailCaptionCandidate(info) {
+      const selectors = [
+        '[data-e2e*="browse-video-desc"]',
+        '[data-e2e*="video-desc"]',
+        '[data-e2e*="search-card-video-caption"]',
+        'h1'
+      ];
+      for (const selector of selectors) {
+        const nodes = this.allVisible(selector);
+        for (const node of nodes) {
+          const text = cleanTikTokCaption(this.text(node), info.author);
+          if (text) return { text, selector, element: node };
+        }
+      }
+
+      const authorBlock = this.visible('[data-e2e*="browse-username"], [data-e2e*="video-author"], a[href^="/@"]');
+      const nearby = authorBlock?.parentElement?.querySelectorAll('div[dir="auto"], span[dir="auto"], div, span') || [];
+      for (const node of Array.from(nearby).filter(app.utils.isVisible)) {
+        const text = cleanTikTokCaption(this.text(node), info.author);
+        if (text && text.length > 1 && !/^@/.test(text)) return { text, selector: 'author-block sibling', element: node };
+      }
+
+      for (const selector of ['meta[property="og:description"]', 'meta[property="og:title"]']) {
+        const node = document.querySelector(selector);
+        const text = cleanTikTokCaption(node?.getAttribute('content'), info.author);
+        if (text) return { text, selector, element: node };
+      }
+      const titleText = cleanTikTokCaption(document.title, info.author);
+      return titleText ? { text: titleText, selector: 'document.title', element: null } : null;
     }
 
-    parseCard(link) {
-      const info = this.videoInfo(link);
-      if (!info) return null;
-      const card = this.cardFor(link);
-      if (!card) return null;
-      if (this.isAdvertisement(card)) return { advertisement: true, postUrl: info.postUrl };
-      let date = videoIdDate(info.videoId);
-      if (!date) {
-        const raw = card.querySelector('time[datetime], [data-create-time]')?.getAttribute('datetime') || card.querySelector('[data-create-time]')?.getAttribute('data-create-time');
-        const parsed = raw ? new Date(/^\d{10}$/.test(raw) ? Number(raw) * 1000 : raw) : null;
-        if (parsed && !Number.isNaN(parsed.getTime())) date = parsed;
-      }
-      if (!date) return null;
-      const textNode = card.querySelector('[data-e2e="search-card-video-caption"], [data-e2e="video-desc"], [data-e2e="browse-video-desc"], [class*="Desc"], [class*="Caption"]');
-      const image = card.querySelector('img[src]');
-      return {
-        postDate: app.utils.formatTimestamp(date),
-        postUrl: info.postUrl,
-        author: info.handle,
-        authorUrl: `https://www.tiktok.com/@${info.handle}`,
-        text: this.text(textNode) || link.getAttribute('title') || '',
-        mediaUrls: [image?.currentSrc || image?.src].filter(Boolean)
+    async expandPostText(element, ctx) {
+      const before = this.detailCaptionCandidate(parseTikTokVideoUrl(location.href) || { author: '' });
+      if (!element || element.matches?.('meta')) return false;
+      const root = element.closest('article, main, [data-e2e*="video-detail"]') || element.parentElement?.parentElement || element.parentElement;
+      if (!root) return false;
+      const controls = this.allVisible('button, [role="button"], span', root);
+      const button = controls.find((control) => {
+        const label = app.utils.normalizeText(`${control.getAttribute('aria-label') || ''} ${this.text(control)}`);
+        return /^(more|see more|read more|ещё|еще|больше|daha çox|daha cox)$/.test(label);
+      });
+      if (!button) return false;
+      await ctx.logger.info('[tiktok] Text expand button found', this.text(button) || button.getAttribute('aria-label') || 'unlabelled');
+      const clicked = await ctx.navigation.click(this.clickable(button), 'TikTok caption expand', { scroll: false });
+      if (!clicked) return false;
+      await app.utils.waitFor(() => {
+        const current = this.detailCaptionCandidate(parseTikTokVideoUrl(location.href) || { author: '' });
+        return current?.text.length > Number(before?.text.length || 0) || !button.isConnected;
+      }, { timeoutMs: 4000, intervalMs: 250, token: ctx.token });
+      return true;
+    }
+
+    detailMediaUrls() {
+      const urls = new Set();
+      const add = (value) => {
+        const url = String(value || '').trim();
+        if (url && !url.startsWith('blob:') && !url.startsWith('data:')) urls.add(url);
       };
+      for (const selector of ['meta[property="og:video"]', 'meta[property="og:video:url"]', 'meta[name="twitter:player:stream"]', 'meta[property="og:image"]']) {
+        add(document.querySelector(selector)?.getAttribute('content'));
+      }
+      const videos = this.allVisible('video').sort((left, right) => {
+        const leftRect = left.getBoundingClientRect();
+        const rightRect = right.getBoundingClientRect();
+        return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);
+      });
+      const detailVideo = videos[0] || document.querySelector('video');
+      for (const video of detailVideo ? [detailVideo] : []) {
+        add(video.currentSrc);
+        add(video.src);
+        add(video.getAttribute('src'));
+        add(video.poster);
+        for (const source of video.querySelectorAll('source[src]')) add(source.src || source.getAttribute('src'));
+      }
+      return Array.from(urls);
+    }
+
+    async openTikTokVideoAndScrape(videoUrl, ctx) {
+      const target = parseTikTokVideoUrl(videoUrl);
+      if (!target) {
+        await ctx.logger.warn('[tiktok] Invalid video URL; detail page cannot be opened', videoUrl);
+        return null;
+      }
+      await ctx.logger.info('[tiktok] Opening video detail page', target.postUrl);
+      const current = parseTikTokVideoUrl(location.href);
+      if (!current || current.videoId !== target.videoId) {
+        window.location.assign(target.postUrl);
+        return { navigating: true };
+      }
+
+      const loaded = await app.utils.waitFor(() => {
+        return this.detailCaptionCandidate(target) || document.querySelector('video, meta[property="og:video"], meta[property="og:description"]');
+      }, { timeoutMs: 12000, intervalMs: 300, token: ctx.token });
+      if (loaded) await ctx.logger.info('[tiktok] Video detail loaded', target.postUrl);
+      else await ctx.logger.warn('[tiktok] Video detail load was not confirmed; parsing available metadata', target.postUrl);
+
+      const initialCaption = this.detailCaptionCandidate(target);
+      await this.expandPostText(initialCaption?.element, ctx);
+      const caption = this.detailCaptionCandidate(target);
+      if (caption) {
+        await ctx.logger.info('[tiktok] Caption selector matched', caption.selector);
+        await ctx.logger.info('[tiktok] Caption text length', String(caption.text.length));
+        await ctx.logger.info('[tiktok] Full text extracted', target.postUrl);
+      } else {
+        await ctx.logger.warn('[tiktok] Caption text was not found; post will be saved with text=null', target.postUrl);
+      }
+
+      const date = videoIdDate(target.videoId);
+      const mediaUrls = this.detailMediaUrls();
+      const post = {
+        source: 'tiktok',
+        keyword: ctx.keyword,
+        postUrl: target.postUrl,
+        text: caption?.text || null,
+        author: target.author,
+        authorUrl: target.authorUrl,
+        mediaUrls: [...mediaUrls],
+        postDate: date ? app.utils.formatTimestamp(date) : null,
+        scrapedAt: new Date().toISOString()
+      };
+      return { ...post, mediaUrls: [...post.mediaUrls] };
     }
 
     candidateMap(limit) {
@@ -211,7 +318,7 @@
       return unique;
     }
 
-    async collect(ctx) {
+    async collectVideoUrls(ctx) {
       const remaining = ctx.targetCount === -1 ? 25 : Math.max(1, ctx.targetCount - ctx.currentCount());
       const candidateLimit = ctx.targetCount === -1 ? 60 : Math.min(150, Math.max(40, remaining * 4));
       const candidates = new Map();
@@ -222,34 +329,115 @@
         stableRounds = candidates.size === before ? stableRounds + 1 : 0;
         if (candidates.size < candidateLimit) await this.scrollPage(ctx);
       }
-      await ctx.logger.info(`TikTok unique video cards: ${candidates.size}`);
+      await ctx.logger.info('[tiktok] Video cards found', String(candidates.size));
+      const urls = Array.from(candidates.entries())
+        .sort(([left], [right]) => {
+          try { return BigInt(right) > BigInt(left) ? 1 : BigInt(right) < BigInt(left) ? -1 : 0; } catch (error) { return 0; }
+        })
+        .map(([, link]) => parseTikTokVideoUrl(link.href)?.postUrl)
+        .filter(Boolean);
+      for (const url of urls) await ctx.logger.info('[tiktok] Video URL collected', url);
+      return urls;
+    }
 
-      const posts = [];
-      for (const link of candidates.values()) {
-        const post = this.parseCard(link);
-        if (post?.advertisement) {
-          await ctx.logger.info('TikTok sponsored video skipped', post.postUrl);
-          continue;
-        }
-        if (!post) {
-          await ctx.logger.warn('TikTok card skipped: unique URL or publication date unavailable');
-          continue;
-        }
-        posts.push({ ...post, mediaUrls: [...post.mediaUrls] });
+    async tiktokProgress(ctx) {
+      const state = await app.storage.getState();
+      const progress = state?.scraperProgress;
+      if (!progress || progress.platform !== 'tiktok' || progress.runId !== ctx.runId || progress.keyword !== ctx.keyword) return null;
+      return progress;
+    }
+
+    async saveTikTokProgress(ctx, progress) {
+      await app.storage.patch(ctx.runId, { scraperProgress: progress });
+    }
+
+    async startDetailQueue(ctx) {
+      const existing = await this.tiktokProgress(ctx);
+      const existingUrl = existing?.videoUrls?.[Number(existing.index || 0)];
+      if (existingUrl) {
+        await ctx.logger.info('[tiktok] Resuming persisted video detail queue', `index=${existing.index}/${existing.videoUrls.length}`);
+        return this.openTikTokVideoAndScrape(existingUrl, ctx);
       }
-      posts.sort((left, right) => new Date(right.postDate).getTime() - new Date(left.postDate).getTime());
-      await ctx.logger.info(`TikTok posts sorted newest first: ${posts.length}`);
-      for (const post of posts) {
-        const outcome = await ctx.onPost(post);
-        if (outcome.limitReached) return { reason: 'target' };
-        if (outcome.older) return { reason: 'date-limit' };
+      const videoUrls = await this.collectVideoUrls(ctx);
+      if (!videoUrls.length) {
+        await ctx.logger.warn('[tiktok] No video URLs were collected from search results');
+        return { reason: 'exhausted' };
       }
-      return { reason: 'exhausted' };
+      const progress = {
+        platform: 'tiktok',
+        runId: ctx.runId,
+        keyword: ctx.keyword,
+        resultsUrl: location.href,
+        videoUrls,
+        index: 0,
+        currentVideoUrl: videoUrls[0]
+      };
+      await this.saveTikTokProgress(ctx, progress);
+      return this.openTikTokVideoAndScrape(videoUrls[0], ctx);
+    }
+
+    async scrapeCurrentDetail(ctx, currentInfo) {
+      let progress = await this.tiktokProgress(ctx);
+      if (!progress) {
+        await ctx.logger.warn('[tiktok] Detail queue was unavailable after navigation; recovering current video only', currentInfo.postUrl);
+        progress = {
+          platform: 'tiktok',
+          runId: ctx.runId,
+          keyword: ctx.keyword,
+          resultsUrl: '',
+          videoUrls: [currentInfo.postUrl],
+          index: 0,
+          currentVideoUrl: currentInfo.postUrl
+        };
+        await this.saveTikTokProgress(ctx, progress);
+      }
+
+      let index = Number(progress.index || 0);
+      const currentIndex = progress.videoUrls.findIndex((url) => parseTikTokVideoUrl(url)?.videoId === currentInfo.videoId);
+      if (currentIndex >= 0) index = currentIndex;
+      const expectedUrl = progress.videoUrls[index];
+      if (expectedUrl && parseTikTokVideoUrl(expectedUrl)?.videoId !== currentInfo.videoId) {
+        return this.openTikTokVideoAndScrape(expectedUrl, ctx);
+      }
+
+      const post = await this.openTikTokVideoAndScrape(currentInfo.postUrl, ctx);
+      if (post?.navigating) return post;
+      if (post) {
+        const outcome = await ctx.onPost({ ...post, mediaUrls: [...post.mediaUrls] });
+        if (outcome.accepted) await ctx.logger.info('[tiktok] Post saved', post.postUrl);
+        else if (outcome.duplicate) await ctx.logger.info('[tiktok] Post skipped as duplicate', post.postUrl);
+        else await ctx.logger.warn('[tiktok] Post was not saved', post.postUrl);
+        if (outcome.limitReached) {
+          await this.saveTikTokProgress(ctx, null);
+          return { reason: 'target' };
+        }
+        if (outcome.older) {
+          await this.saveTikTokProgress(ctx, null);
+          return { reason: 'date-limit' };
+        }
+      }
+
+      const nextIndex = index + 1;
+      const nextUrl = progress.videoUrls[nextIndex];
+      if (!nextUrl) {
+        await this.saveTikTokProgress(ctx, null);
+        return { reason: 'exhausted' };
+      }
+      const nextProgress = { ...progress, index: nextIndex, currentVideoUrl: nextUrl };
+      await this.saveTikTokProgress(ctx, nextProgress);
+      return this.openTikTokVideoAndScrape(nextUrl, ctx);
+    }
+
+    async collect(ctx) {
+      const currentDetail = parseTikTokVideoUrl(location.href);
+      if (currentDetail) return this.scrapeCurrentDetail(ctx, currentDetail);
+      return this.startDetailQueue(ctx);
     }
   }
 
   app.parsers = app.parsers || {};
   app.parsers.tiktokVideoIdDate = videoIdDate;
   app.parsers.tiktokVideoUrl = parseTikTokVideoUrl;
+  app.parsers.tiktokCaption = cleanTikTokCaption;
   app.scrapers.tiktok = new TikTokScraper();
 })(globalThis.ScraperApp);
