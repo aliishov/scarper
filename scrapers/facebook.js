@@ -38,6 +38,16 @@
       || /^(just now|today|yesterday|сейчас|только что|сегодня|вчера)$/i.test(text);
   }
 
+  function applyTimeFromText(date, value) {
+    const match = String(value || '').match(/(?:at|в)?\s*(\d{1,2})[:.](\d{2})\s*(am|pm)?/i);
+    if (!match) return date;
+    let hour = Number(match[1]);
+    if (/pm/i.test(match[3]) && hour < 12) hour += 12;
+    if (/am/i.test(match[3]) && hour === 12) hour = 0;
+    date.setHours(hour, Number(match[2]), 0, 0);
+    return date;
+  }
+
   function parseFacebookDate(value, now = new Date()) {
     if (value === null || value === undefined) return null;
     const original = String(value).replace(/\u00a0/g, ' ').replace(/[\u200e\u200f]/g, '').trim();
@@ -60,11 +70,11 @@
     const lower = normalized.toLowerCase().replace(/\./g, '');
 
     if (/^(just now|сейчас|только что|indi)$/.test(lower)) return new Date(now);
-    if (/^(today|сегодня|bu gün|bu gun)/.test(lower)) return new Date(now);
+    if (/^(today|сегодня|bu gün|bu gun)/.test(lower)) return applyTimeFromText(new Date(now), normalized);
     if (/^(yesterday|вчера|dünən|dunen)/.test(lower)) {
       const date = new Date(now);
       date.setDate(date.getDate() - 1);
-      return date;
+      return applyTimeFromText(date, normalized);
     }
 
     const relative = lower.match(/(?:about\s+)?(\d+)\s*([a-zа-яёəğıöşüç]+)/iu);
@@ -309,6 +319,21 @@
       } catch (error) { return ''; }
     }
 
+    postUrlForArticle(article) {
+      const urls = Array.from(new Set(Array.from(article.querySelectorAll('a[href]'))
+        .map((link) => this.normalizePostUrl(link.href))
+        .filter(Boolean)));
+      const score = (value) => {
+        const url = new URL(value);
+        if (url.searchParams.has('story_fbid') || /\/(posts|permalink)\//i.test(url.pathname)) return 100;
+        if (/\/groups\/[^/]+\/posts\//i.test(url.pathname)) return 95;
+        if (/\/(videos|reel)\//i.test(url.pathname)) return 80;
+        if (/\/(photo|photos)\//i.test(url.pathname) || url.searchParams.has('fbid')) return 60;
+        return 0;
+      };
+      return urls.sort((left, right) => score(right) - score(left))[0] || '';
+    }
+
     messageNode(article) {
       const preferred = ['[data-ad-comet-preview="message"]', '[data-testid="post_message"]'];
       for (const selector of preferred) {
@@ -353,17 +378,148 @@
       return expanded;
     }
 
-    dateCandidate(value, element, score, source) {
-      if (!looksLikeFacebookDate(value)) return null;
-      const parsed = parseFacebookDate(value);
-      return parsed ? { value: String(value).trim(), element, score, source, parsed } : null;
+    cleanPostText(value) {
+      return String(value || '')
+        .replace(/\s+(see more|read more|ещё|еще|показать ещё|показать еще|daha çox|daha cox)$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
     }
 
-    async hoverDateCandidate(element, selector, ctx) {
+    extractPostText(article, options = {}) {
+      const message = this.messageNode(article);
+      const messageText = this.cleanPostText(this.text(message));
+      if (messageText && !isMediaTooltipText(messageText)) return { text: messageText, source: 'message node' };
+
+      const header = this.facebookHeaderMetaArea(article);
+      const author = this.text(this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href]', article)[0]);
+      const selectors = options.broad
+        ? '[data-ad-comet-preview="message"], [data-testid="post_message"], [data-ad-rendering-role="story_message"], div[dir="auto"], span[dir="auto"], p, div, span'
+        : '[data-ad-comet-preview="message"], [data-testid="post_message"], [data-ad-rendering-role="story_message"], div[dir="auto"], span[dir="auto"], p';
+      const candidates = this.allVisible(selectors, article).filter((element) => {
+        if (header?.contains(element) || element.contains(header)) return false;
+        if (element.closest('button, [role="button"], [role="menu"], [role="tooltip"]')) return false;
+        if (element.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"]')) return false;
+        if (element.matches('img, video, svg') || element.querySelector('img, video')) return false;
+        const text = this.cleanPostText(this.text(element));
+        if (!text || text === author || isMediaTooltipText(text)) return false;
+        if (text.length <= 80 && (hasTemporalEvidence(text) || /^(see more|read more|ещё|еще|like|comment|share)$/i.test(text))) return false;
+        const rect = element.getBoundingClientRect();
+        const articleRect = article.getBoundingClientRect();
+        return rect.top >= articleRect.top && rect.height < articleRect.height * 0.8;
+      });
+      const ranked = candidates.map((element) => ({ element, text: this.cleanPostText(this.text(element)) }))
+        .filter((candidate) => candidate.text.length <= 20000)
+        .sort((left, right) => right.text.length - left.text.length);
+      return ranked[0] ? { text: ranked[0].text, source: options.broad ? 'broad post container' : 'alternate message node' } : { text: '', source: 'none' };
+    }
+
+    dateCandidate(value, element, score, source) {
+      const text = String(value || '').replace(/\s+/g, ' ').trim();
+      if (!text || text.length > 80 || !looksLikeFacebookDate(text)) return null;
+      const parsed = parseFacebookDate(value);
+      return parsed ? { value: text, element, score, source, parsed } : null;
+    }
+
+    facebookHeaderMetaArea(article) {
+      const articleRect = article.getBoundingClientRect();
+      const message = this.messageNode(article);
+      const inHeaderBand = (element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.top >= articleRect.top - 20 && rect.top <= articleRect.top + Math.min(280, articleRect.height * 0.35);
+      };
+      const postLinks = this.allVisible('a[href]', article).filter((link) => {
+        const text = this.text(link);
+        return inHeaderBand(link) && text.length <= 80 && this.normalizePostUrl(link.href) && !link.querySelector('img, video');
+      });
+      const publicIndicators = this.allVisible('[aria-label], svg title', article).filter((element) => {
+        const label = app.utils.normalizeText(element.getAttribute('aria-label') || this.text(element));
+        return inHeaderBand(element) && /(shared with public|public visibility|доступно всем|общедоступно|herkese açık|herkese acik)/i.test(label);
+      });
+      const authorLinks = this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', article)
+        .filter((link) => inHeaderBand(link) && this.text(link) && !this.normalizePostUrl(link.href));
+      const seeds = [...postLinks, ...publicIndicators.map((element) => element.closest('[aria-label], span, a, div') || element), ...authorLinks];
+      let best = null;
+      for (const seed of seeds) {
+        let current = seed;
+        for (let depth = 0; current && current !== article && depth < 8; depth++, current = current.parentElement) {
+          const rect = current.getBoundingClientRect();
+          if (!inHeaderBand(current) || rect.height < 8 || rect.height > 260) continue;
+          if (message && (current === message || current.contains(message))) continue;
+          const hasPostLink = postLinks.some((element) => current.contains(element));
+          const hasPublic = publicIndicators.some((element) => current.contains(element));
+          const hasAuthor = authorLinks.some((element) => current.contains(element));
+          if (!hasPostLink && !hasPublic) continue;
+          const score = (hasPostLink ? 8 : 0) + (hasPublic ? 6 : 0) + (hasAuthor ? 3 : 0) - rect.height / 300;
+          if (!best || score > best.score || (score === best.score && rect.height < best.rect.height)) best = { element: current, score, rect };
+        }
+      }
+      return best?.element || null;
+    }
+
+    rejectedDateElement(element, article) {
+      if (!element || element.matches('img, video') || element.querySelector('img, video')) return true;
+      const message = this.messageNode(article);
+      if (message?.contains(element)) return true;
+      if (element.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"], [role="tooltip"]')) return true;
+      const text = this.text(element);
+      return text.length > 80 || isMediaTooltipText(text);
+    }
+
+    headerDateCandidates(article, header) {
+      if (!header) return [];
+      const definitions = [
+        ['[data-utime]', 1000],
+        ['time', 950],
+        ['abbr', 900],
+        ['a[href*="/posts/"]', 880],
+        ['a[href*="/permalink/"]', 880],
+        ['a[href*="story_fbid"]', 870],
+        ['a[href*="fbid="]', 850],
+        ['a[href*="/videos/"]', 820],
+        ['a[href*="/photo"]', 780],
+        ['[aria-label]', 700],
+        ['span', 400]
+      ];
+      const found = [];
+      for (const [selector, priority] of definitions) {
+        const elements = [header, ...header.querySelectorAll(selector)].filter((element) => element.matches?.(selector));
+        for (const element of elements) {
+          if (!app.utils.isVisible(element) || this.rejectedDateElement(element, article)) continue;
+          const values = [
+            element.getAttribute('data-utime'),
+            element.getAttribute('datetime'),
+            element.getAttribute('title'),
+            element.getAttribute('aria-label'),
+            this.text(element)
+          ].filter((value) => String(value).trim().length > 0 && String(value).trim().length <= 80);
+          const hasDateValue = values.some(hasTemporalEvidence);
+          const postUrl = element.matches('a[href]') ? this.normalizePostUrl(element.href) : '';
+          if (!hasDateValue && !postUrl) continue;
+          if (postUrl && /\/(photo|photos)\//i.test(new URL(postUrl).pathname) && !hasDateValue) continue;
+          found.push({ element, selector, priority: priority + (hasDateValue ? 100 : 0), values });
+        }
+      }
+      const unique = new Map();
+      for (const candidate of found.sort((left, right) => right.priority - left.priority)) {
+        if (!unique.has(candidate.element)) unique.set(candidate.element, candidate);
+      }
+      return Array.from(unique.values());
+    }
+
+    outsideHeaderDateCandidateCount(article, header) {
+      const selector = '[data-utime], time, abbr, a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid"], a[href*="fbid="], a[href*="/videos/"], a[href*="/photo"], [aria-label]';
+      return this.allVisible(selector, article).filter((element) => {
+        if (header?.contains(element) || this.rejectedDateElement(element, article)) return false;
+        const values = [element.getAttribute('data-utime'), element.getAttribute('datetime'), element.getAttribute('title'), element.getAttribute('aria-label'), this.text(element)];
+        return values.some((value) => String(value || '').trim().length <= 80 && hasTemporalEvidence(value)) || (element.matches('a[href]') && !!this.normalizePostUrl(element.href));
+      }).length;
+    }
+
+    async hoverHeaderDateCandidate(element, selector, ctx) {
       const tooltipSelector = '[role="tooltip"], [data-testid="tooltip"]';
       const before = new Map(Array.from(document.querySelectorAll(tooltipSelector)).map((node) => [node, this.text(node)]));
-      await ctx.logger.info(`Facebook date candidate found: selector=${selector}`, this.text(element).slice(0, 80));
-      await ctx.logger.info('Facebook hovering date candidate');
+      await ctx.logger.info('Facebook Header date candidate found', `selector=${selector}, text=${this.text(element).slice(0, 80)}`);
+      await ctx.logger.info('Facebook Hovering header date candidate');
       const rect = element.getBoundingClientRect();
       const eventOptions = {
         bubbles: true,
@@ -379,7 +535,7 @@
       for (const type of ['mouseenter', 'mouseover', 'mousemove']) {
         element.dispatchEvent(new MouseEvent(type, eventOptions));
       }
-      for (let attempt = 0; attempt < 8; attempt++) {
+      for (let attempt = 0; attempt < 6; attempt++) {
         await app.utils.sleep(250, ctx.token);
         const referencedIds = `${element.getAttribute('aria-describedby') || ''} ${element.getAttribute('aria-labelledby') || ''}`.trim().split(/\s+/).filter(Boolean);
         const referenced = referencedIds.map((id) => document.getElementById(id)).filter(Boolean);
@@ -389,93 +545,91 @@
           if (!text) continue;
           const isFresh = !before.has(tooltip) || before.get(tooltip) !== text || referenced.includes(tooltip);
           if (!isFresh) continue;
-          await ctx.logger.info('Facebook tooltip text', text.slice(0, 180));
+          await ctx.logger.info('Facebook Tooltip text', text.slice(0, 180));
           if (isMediaTooltipText(text)) {
-            await ctx.logger.warn('Facebook tooltip rejected: image/media accessibility text', text.slice(0, 180));
+            await ctx.logger.warn('Facebook Tooltip rejected: media alt text', text.slice(0, 180));
             continue;
           }
           if (!looksLikeFacebookDate(text)) {
-            await ctx.logger.warn('Facebook tooltip rejected: not a publication date', text.slice(0, 180));
+            await ctx.logger.warn('Facebook Tooltip rejected: not a publication date', text.slice(0, 180));
             continue;
           }
           const parsed = parseFacebookDate(text);
-          await ctx.logger.info('Facebook tooltip accepted as date', text);
-          await ctx.logger.info('Facebook parsed post date', app.utils.formatTimestamp(parsed));
+          await ctx.logger.info('Facebook Tooltip accepted as publication date', text);
+          await ctx.logger.info('Facebook Parsed post date', app.utils.formatTimestamp(parsed));
           return { parsed, text, source: `hover:${selector}` };
         }
       }
       return null;
     }
 
-    facebookDateElements(article) {
-      const articleRect = article.getBoundingClientRect();
-      const inAuthorHeader = (element) => {
-        const rect = element.getBoundingClientRect();
-        return rect.top >= articleRect.top - 20 && rect.top <= articleRect.top + Math.min(240, articleRect.height * 0.32);
-      };
-      const definitions = [
-        ['[data-utime]', 1000],
-        ['time', 950],
-        ['abbr', 900],
-        ['a[href*="/posts/"]', 850],
-        ['a[href*="/photo"]', 830],
-        ['a[href*="/videos/"]', 830],
-        ['a[href*="story_fbid"]', 850],
-        ['a[href*="fbid="]', 840],
-        ['a[aria-label]', 700],
-        ['span', 400]
-      ];
-      const found = [];
-      for (const [selector, priority] of definitions) {
-        for (const element of this.allVisible(selector, article)) {
-          if (!inAuthorHeader(element)) continue;
-          if (element.closest('img, video, [role="img"]')) continue;
-          const values = [
-            element.getAttribute('data-utime'),
-            element.getAttribute('datetime'),
-            element.getAttribute('title'),
-            element.getAttribute('aria-label'),
-            this.text(element)
-          ].filter(Boolean);
-          const hasDateValue = values.some(hasTemporalEvidence);
-          const hasPostHref = element.matches('a[href]') && !!this.normalizePostUrl(element.href);
-          if (!hasDateValue && !hasPostHref) continue;
-          found.push({ element, selector, priority, values });
-        }
-      }
-      const unique = new Map();
-      for (const candidate of found.sort((left, right) => right.priority - left.priority)) {
-        if (!unique.has(candidate.element)) unique.set(candidate.element, candidate);
-      }
-      return Array.from(unique.values());
-    }
-
-    async getFacebookDateFromHover(article, ctx) {
-      const candidates = this.facebookDateElements(article);
-      await ctx.logger.info(`Facebook date hover candidates: ${candidates.length}`);
-      for (const candidate of candidates.slice(0, 8)) {
+    async parseFacebookDateFromHeaderHover(article, ctx) {
+      const header = this.facebookHeaderMetaArea(article);
+      await ctx.logger.info('Facebook Header/meta area found', String(!!header));
+      const candidates = this.headerDateCandidates(article, header);
+      await ctx.logger.info('Facebook Date candidates in header', String(candidates.length));
+      await ctx.logger.info('Facebook Date candidates outside header ignored', String(this.outsideHeaderDateCandidateCount(article, header)));
+      for (const candidate of candidates.slice(0, 6)) {
+        const hovered = await this.hoverHeaderDateCandidate(candidate.element, candidate.selector, ctx);
+        if (hovered) return app.utils.formatTimestamp(hovered.parsed);
         for (const value of candidate.values) {
           if (isMediaTooltipText(value)) {
-            await ctx.logger.warn('Facebook date value rejected: image/media accessibility text', value.slice(0, 180));
+            await ctx.logger.warn('Facebook Tooltip rejected: media alt text', value.slice(0, 180));
             continue;
           }
-          if (looksLikeFacebookDate(value) && /^(\d{10,13}|\d{4}-\d{2}-\d{2})/.test(value)) {
-            const parsed = parseFacebookDate(value);
-            await ctx.logger.info(`Facebook date accepted from ${candidate.selector}`, `${value} -> ${app.utils.formatTimestamp(parsed)}`);
-            return parsed;
-          }
+          const parsed = parseFacebookDate(value);
+          if (!parsed) continue;
+          await ctx.logger.info('Facebook date accepted from header attribute/text', `selector=${candidate.selector}, value=${value}`);
+          await ctx.logger.info('Facebook Parsed post date', app.utils.formatTimestamp(parsed));
+          return app.utils.formatTimestamp(parsed);
         }
-        const hovered = await this.hoverDateCandidate(candidate.element, candidate.selector, ctx);
-        if (hovered) return hovered.parsed;
       }
       return null;
     }
 
-    async extractDate(article, ctx) {
-      const hovered = await this.getFacebookDateFromHover(article, ctx);
-      if (hovered) return hovered;
+    async resolveDateFromPermalink(postUrl, ctx) {
+      if (!postUrl || typeof fetch !== 'function') return null;
+      await ctx.logger.info('Facebook permalink date fallback started', postUrl);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort('timeout'), 8000);
+      const unsubscribe = ctx.token.onCancel(() => controller.abort('cancelled'));
+      try {
+        const response = await fetch(postUrl, { credentials: 'include', signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const html = await response.text();
+        const patterns = [
+          ['permalink creation time', /\\?"(?:creation_time|publish_time|publish_timestamp|creation_timestamp)\\?"\s*:\s*\\?"?(\d{10,13})/gi],
+          ['permalink data-utime', /data-utime=["'](\d{10,13})["']/gi],
+          ['permalink time datetime', /<time[^>]+datetime=["']([^"']{8,80})["']/gi]
+        ];
+        for (const [source, pattern] of patterns) {
+          for (const match of html.matchAll(pattern)) {
+            const parsed = parseFacebookDate(match[1]);
+            if (!parsed) continue;
+            await ctx.logger.info(`Facebook date parsed from ${source}`, app.utils.formatTimestamp(parsed));
+            return parsed;
+          }
+        }
+        await ctx.logger.warn('Facebook permalink page did not expose a publication date', postUrl);
+      } catch (error) {
+        ctx.token.throwIfCancelled();
+        await ctx.logger.warn('Facebook permalink date fallback failed', error.message);
+      } finally {
+        clearTimeout(timeout);
+        unsubscribe();
+      }
+      return null;
+    }
+
+    async extractDate(article, ctx, postUrl = '') {
+      const headerDate = await this.parseFacebookDateFromHeaderHover(article, ctx);
+      if (headerDate) {
+        await ctx.logger.info('Facebook Date parse result', headerDate);
+        return new Date(headerDate);
+      }
       const fallbackCandidates = [];
       const push = (value, element, score, source) => {
+        if (this.rejectedDateElement(element, article)) return;
         const candidate = this.dateCandidate(value, element, score, source);
         if (candidate) fallbackCandidates.push(candidate);
       };
@@ -488,9 +642,19 @@
       for (const element of article.querySelectorAll('abbr[title]')) push(element.getAttribute('title'), element, 900, 'abbr title fallback');
       fallbackCandidates.sort((left, right) => right.score - left.score);
       const best = fallbackCandidates[0] || null;
-      if (best) await ctx.logger.info(`Facebook date parsed from ${best.source}`, `${best.value} -> ${app.utils.formatTimestamp(best.parsed)}`);
-      else await ctx.logger.warn('Facebook publication date not found; post will be skipped');
-      return best?.parsed || null;
+      if (best) {
+        await ctx.logger.info(`Facebook date parsed from ${best.source}`, `${best.value} -> ${app.utils.formatTimestamp(best.parsed)}`);
+        await ctx.logger.info('Facebook Date parse result', app.utils.formatTimestamp(best.parsed));
+        return best.parsed;
+      }
+      const permalinkDate = await this.resolveDateFromPermalink(postUrl, ctx);
+      if (permalinkDate) {
+        await ctx.logger.info('Facebook Date parse result', app.utils.formatTimestamp(permalinkDate));
+        return permalinkDate;
+      }
+      await ctx.logger.warn('Facebook publication date not found after all resolver stages');
+      await ctx.logger.info('Facebook Date parse result', 'null');
+      return null;
     }
 
     parsePostDate(article, ctx) {
@@ -498,7 +662,7 @@
     }
 
     shouldSkipPost(post) {
-      return !post || post.advertisement === true || !post.postUrl || !post.postDate;
+      return !post || post.advertisement === true || !post.postUrl;
     }
 
     ancestorPostContainer(node) {
@@ -574,24 +738,41 @@
 
     async parseArticle(article, ctx) {
       if (this.isAdvertisement(article)) return { advertisement: true };
-      const postUrl = Array.from(article.querySelectorAll('a[href]')).map((link) => this.normalizePostUrl(link.href)).find(Boolean) || '';
-      if (!postUrl) return null;
+      const postUrl = this.postUrlForArticle(article);
+      await ctx.logger.info('Facebook Post URL', postUrl || 'unavailable');
+      await ctx.logger.info('Facebook Date limit enabled', String(!!ctx.state.dateLimit));
+      if (!postUrl) {
+        await ctx.logger.warn('Facebook Post saved/skipped reason', 'skipped: post URL unavailable');
+        return null;
+      }
       await this.expandPostText(article, ctx);
-      const postDate = await this.extractDate(article, ctx);
-      if (!postDate) return null;
+      let textResult = this.extractPostText(article);
+      if (!textResult.text) {
+        await ctx.logger.warn('Facebook post text is empty after primary extraction; retrying expand and alternate container extraction', postUrl);
+        await this.expandPostText(article, ctx);
+        textResult = this.extractPostText(article, { broad: true });
+      }
+      if (textResult.text) await ctx.logger.info('Facebook post text extracted', `source=${textResult.source}, length=${textResult.text.length}`);
+      else await ctx.logger.warn('Facebook post genuinely has no text; saving without synthetic text', postUrl);
+
+      const postDate = await this.extractDate(article, ctx, postUrl);
+      if (!postDate && ctx.state.dateLimit) {
+        await ctx.logger.warn('Facebook Post saved/skipped reason', 'skipped: date unavailable while date limit is enabled');
+        return null;
+      }
+      if (!postDate) await ctx.logger.warn('Facebook date unavailable; post will be saved with postDate=null because date limit is disabled', postUrl);
       const authorLink = this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', article)
         .find((link) => !this.normalizePostUrl(link.href) && this.text(link));
-      const message = this.messageNode(article);
       const mediaUrls = [
         ...Array.from(article.querySelectorAll('img[src]')).filter((image) => image.width > 150 || image.naturalWidth > 150).map((image) => image.currentSrc || image.src),
         ...Array.from(article.querySelectorAll('video')).map((video) => video.poster || video.src)
       ].filter(Boolean);
       return {
-        postDate: app.utils.formatTimestamp(postDate),
+        postDate: postDate ? app.utils.formatTimestamp(postDate) : null,
         postUrl,
         author: this.text(authorLink) || 'Unknown',
         authorUrl: authorLink?.href || '',
-        text: this.text(message),
+        text: textResult.text,
         mediaUrls
       };
     }
@@ -601,7 +782,7 @@
     }
 
     postKeyForArticle(article) {
-      const postUrl = Array.from(article.querySelectorAll('a[href]')).map((link) => this.normalizePostUrl(link.href)).find(Boolean);
+      const postUrl = this.postUrlForArticle(article);
       if (postUrl) return postUrl;
       const signature = this.text(this.messageNode(article) || article).slice(0, 240);
       return signature ? `facebook:text:${signature}` : '';
@@ -673,6 +854,7 @@
       let noNewRounds = 0;
       let emptyRounds = 0;
       let lastScrollY = window.scrollY;
+      let candidateIndex = 0;
       const setKey = `${ctx.runId}:${ctx.keyword}`;
       if (!this.processedPostKeys.has(setKey)) {
         this.processedPostKeys.set(setKey, new Set());
@@ -704,6 +886,8 @@
         await ctx.logger.info('Facebook already processed visible posts', String(alreadyProcessed));
         for (const article of uniqueVisible) {
           ctx.token.throwIfCancelled();
+          candidateIndex++;
+          await ctx.logger.info('Facebook Post candidate index', String(candidateIndex));
           const postKey = this.postKeyForArticle(article);
           if (postKey) processedPostKeys.add(postKey);
           const beforePostScrollY = window.scrollY;
@@ -715,16 +899,31 @@
           }
           if (post?.advertisement) {
             await ctx.logger.info('Facebook sponsored post skipped');
+            await ctx.logger.info('Facebook Post saved/skipped reason', 'skipped: advertisement');
             continue;
           }
-          if (!post) continue;
+          if (!post) {
+            await ctx.logger.info('Facebook Post saved/skipped reason', 'skipped: parser returned no post');
+            continue;
+          }
           const outcome = await ctx.onPost(post);
-          if (outcome.limitReached) return { reason: 'target' };
+          if (outcome.limitReached) {
+            await ctx.logger.info('Facebook Post saved/skipped reason', 'saved: target count reached');
+            return { reason: 'target' };
+          }
           if (outcome.older) {
+            await ctx.logger.info('Facebook Post saved/skipped reason', 'skipped: older than date limit');
             await ctx.logger.info('Facebook date limit reached; finishing current keyword', post.postDate);
             return { reason: 'date-limit' };
           }
-          if (outcome.accepted) accepted++;
+          if (outcome.accepted) {
+            accepted++;
+            await ctx.logger.info('Facebook Post saved/skipped reason', 'saved: accepted');
+          } else if (outcome.duplicate) {
+            await ctx.logger.info('Facebook Post saved/skipped reason', 'skipped: duplicate');
+          } else {
+            await ctx.logger.info('Facebook Post saved/skipped reason', 'skipped: validation or persistence rejected the post');
+          }
         }
         noNewRounds = accepted ? 0 : noNewRounds + 1;
         lastScrollY = await this.scrollForward(ctx, lastScrollY);

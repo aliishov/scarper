@@ -105,11 +105,18 @@
             const post = app.utils.normalizePost(rawPost, { keyword, source: state.platform });
             const missing = app.utils.validatePost(post);
             if (missing.length) await logger.warn(`Post has empty required fields: ${missing.join(', ')}`, post.postUrl || 'URL unavailable');
-            if (!post.postUrl || !post.postDate) {
-              await logger.warn('Post skipped because URL or publication date is unavailable');
+            if (!post.postUrl) {
+              await logger.warn('Post skipped because URL is unavailable');
               return { accepted: false, invalid: true };
             }
-            if (app.utils.isBeforeDateLimit(post.postDate, state.dateLimit)) {
+            if (!post.postDate && state.dateLimit) {
+              await logger.warn('Post skipped because publication date is unavailable while date limit is enabled', post.postUrl);
+              return { accepted: false, invalid: true, missingDate: true };
+            }
+            if (!post.postDate) {
+              await logger.warn('Post has no publication date; saving because date limit is disabled', post.postUrl);
+            }
+            if (post.postDate && app.utils.isBeforeDateLimit(post.postDate, state.dateLimit)) {
               await logger.info(`Post skipped because it is older than ${state.dateLimit}`, post.postUrl);
               return { accepted: false, older: true };
             }

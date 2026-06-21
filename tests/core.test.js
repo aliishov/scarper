@@ -95,7 +95,24 @@ test('Facebook parses localized relative dates', () => {
   assert.equal(app.parsers.facebookDate('3 weeks ago', now).getTime(), now.getTime() - 21 * 86400000);
   const twoMonths = app.parsers.facebookDate('2 месяца', now);
   assert.equal(twoMonths.getMonth(), 3);
+  const yesterday = app.parsers.facebookDate('Yesterday at 9:10 PM', now);
+  assert.equal(yesterday.getDate(), 19);
+  assert.equal(yesterday.getHours(), 21);
+  assert.equal(yesterday.getMinutes(), 10);
   assert.equal(app.parsers.facebookDate('not a publication date', now), null);
+});
+
+test('posts can retain a null publication date in the public payload', () => {
+  const normalized = app.utils.normalizePost({
+    postDate: null,
+    postUrl: 'https://www.facebook.com/example/posts/123',
+    author: 'Author',
+    authorUrl: 'https://www.facebook.com/example',
+    text: '',
+    mediaUrls: []
+  }, { keyword: 'test', source: 'facebook' });
+  assert.equal(normalized.postDate, null);
+  assert.equal(app.server.toPayload(normalized).postDate, null);
 });
 
 test('TikTok video snowflake yields a stable publication date', () => {
