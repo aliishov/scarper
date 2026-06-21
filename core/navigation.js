@@ -35,11 +35,11 @@
       this.token = token;
     }
 
-    async click(element, label) {
+    async click(element, label, options = {}) {
       this.token.throwIfCancelled();
       if (!element || !isVisible(element)) return false;
       await this.logger.info(`Click: ${label}`);
-      element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      if (options.scroll !== false) element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
       await sleep(randomInt(100, 300), this.token);
       for (const type of ['pointerover', 'mouseover', 'mousemove', 'mousedown', 'mouseup']) {
         element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));

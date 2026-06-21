@@ -69,6 +69,25 @@ test('Facebook parses absolute tooltip date without replacing it with now', () =
   assert.equal(parsed.getMinutes(), 28);
 });
 
+test('Facebook accepts the author-time tooltip and rejects media accessibility tooltips', () => {
+  const tooltip = 'Saturday, June 20, 2026 at 3:29 PM';
+  assert.equal(app.parsers.facebookDateText(tooltip), true);
+  const parsed = app.parsers.facebookDate(tooltip, new Date(2026, 5, 21, 12));
+  assert.equal(parsed.getDate(), 20);
+  assert.equal(parsed.getHours(), 15);
+  assert.equal(parsed.getMinutes(), 29);
+  for (const value of [
+    'May be an image of car and text',
+    'May be a video of a vehicle',
+    'Image may contain: car, text and 2026',
+    'На изображении может быть автомобиль и текст'
+  ]) {
+    assert.equal(app.parsers.facebookMediaTooltip(value), true);
+    assert.equal(app.parsers.facebookDate(value, new Date(2026, 5, 21, 12)), null);
+    assert.equal(app.parsers.facebookDateText(value), false);
+  }
+});
+
 test('Facebook parses localized relative dates', () => {
   const now = new Date(2026, 5, 20, 12, 0, 0);
   assert.equal(app.parsers.facebookDate('2 min ago', now).getTime(), now.getTime() - 120000);

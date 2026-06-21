@@ -82,20 +82,24 @@
           });
           if (!ready) throw new Error(`${state.platform} login is required`);
 
-          state = await this.transition(state, 'searching', { requestedAction: null });
-          const searchResult = await scraper.searchKeyword(keyword, {
-            state,
-            logger,
-            navigation,
-            token: this.keywordToken,
-            credentials: this.credentialsFor(state.platform)
-          });
-          if (searchResult?.navigating) {
-            await logger.info('Navigation started; state machine will resume after tab load');
-            return;
+          const resumeScraping = state.phase === 'scraping';
+          if (!resumeScraping) {
+            state = await this.transition(state, 'searching', { requestedAction: null });
+            const searchResult = await scraper.searchKeyword(keyword, {
+              state,
+              logger,
+              navigation,
+              token: this.keywordToken,
+              credentials: this.credentialsFor(state.platform)
+            });
+            if (searchResult?.navigating) {
+              await logger.info('Navigation started; state machine will resume after tab load');
+              return;
+            }
+            state = await this.transition(state, 'scraping');
+          } else {
+            await logger.info('Resuming scraping phase without repeating search or filters');
           }
-
-          state = await this.transition(state, 'scraping');
           const onPost = async (rawPost) => {
             this.keywordToken.throwIfCancelled();
             const post = app.utils.normalizePost(rawPost, { keyword, source: state.platform });
