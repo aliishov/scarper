@@ -334,6 +334,50 @@
       return urls.sort((left, right) => score(right) - score(left))[0] || '';
     }
 
+    permalinkAnchors(root, postUrl = '') {
+      return this.allVisible('a[href]', root).map((link) => {
+        const normalizedUrl = this.normalizePostUrl(link.href);
+        if (!normalizedUrl || (postUrl && normalizedUrl !== postUrl)) return null;
+        const rect = link.getBoundingClientRect();
+        const text = this.text(link);
+        const media = !!link.querySelector('img, video') || !!link.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"]');
+        const temporal = [text, link.getAttribute('aria-label'), link.getAttribute('title')].some(hasTemporalEvidence);
+        const compact = rect.height > 0 && rect.height <= 80 && rect.width <= 420 && text.length <= 80;
+        const score = (temporal ? 100 : 0) + (compact ? 40 : 0) + (!media ? 30 : -100);
+        return { link, normalizedUrl, media, compact, temporal, score };
+      }).filter(Boolean).sort((left, right) => right.score - left.score);
+    }
+
+    postElementFromPermalink(root, postUrl = '') {
+      const anchors = this.permalinkAnchors(root, postUrl);
+      const anchor = anchors.find((candidate) => !candidate.media)?.link || anchors[0]?.link || null;
+      if (!anchor) return root;
+      const semantic = anchor.closest('article, [role="article"], [data-pagelet*="FeedUnit"]');
+      if (semantic && app.utils.isVisible(semantic)) return semantic;
+      let best = null;
+      for (let current = anchor.parentElement, depth = 0; current && depth < 16; current = current.parentElement, depth++) {
+        const rect = current.getBoundingClientRect();
+        if (rect.height >= 5000) break;
+        if (rect.height < 160 || rect.width < 260) continue;
+        const hasMessage = !!this.messageNode(current);
+        const hasMedia = !!current.querySelector('img[src], video');
+        const hasAuthor = !!current.querySelector('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]');
+        if ((hasMessage || hasMedia) && hasAuthor) {
+          best = current;
+          break;
+        }
+        if (current === root) break;
+      }
+      return best || root;
+    }
+
+    resolvePostContext(root) {
+      const postUrl = this.postUrlForArticle(root);
+      const postElement = this.postElementFromPermalink(root, postUrl);
+      const permalink = this.permalinkAnchors(postElement, postUrl)[0]?.link || null;
+      return { postUrl, postElement, permalink };
+    }
+
     messageNode(article) {
       const preferred = ['[data-ad-comet-preview="message"]', '[data-testid="post_message"]'];
       for (const selector of preferred) {
@@ -345,35 +389,58 @@
     }
 
     async expandPostText(article, ctx) {
+      const expandPattern = /^(see more|see more\.\.\.|more|read more|show more|ещё|еще|показать ещё|показать еще|показать больше|daha çox|daha cox|devamını gör|devamini gor)$/i;
+      const tried = new Set();
       let expanded = false;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        const message = this.messageNode(article) || article;
-        const beforeText = this.text(message);
-        const controls = this.allVisible('button, [role="button"], a, span', article);
-        const button = controls.find((element) => {
-          const labels = [element.getAttribute('aria-label'), this.text(element)].map(app.utils.normalizeText).filter(Boolean);
-          return labels.some((label) => /^(see more|read more|ещё|еще|показать ещё|показать еще|показать больше|daha çox|daha cox)$/.test(label));
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        const message = this.messageNode(article);
+        const roots = [message, message?.parentElement, article].filter(Boolean);
+        const found = [];
+        roots.forEach((root, priority) => {
+          for (const element of this.allVisible('button, [role="button"], a, span, div', root)) {
+            const labels = [element.getAttribute('aria-label'), this.text(element)].map((value) => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+            const label = labels.find((value) => value.length <= 60 && expandPattern.test(value));
+            if (!label) continue;
+            if (priority === 2 && /^more$/i.test(label)) continue;
+            const clickable = element.closest('button, a, [role="button"]') || this.clickable(element);
+            if (!clickable || !article.contains(clickable) || tried.has(clickable)) continue;
+            found.push({ element, clickable, label, priority });
+          }
         });
-        if (!button) {
+        const uniqueCandidates = new Map();
+        for (const candidate of found.sort((left, right) => left.priority - right.priority)) {
+          if (!uniqueCandidates.has(candidate.clickable)) uniqueCandidates.set(candidate.clickable, candidate);
+        }
+        const candidates = Array.from(uniqueCandidates.values());
+        await ctx.logger.info('Facebook Expand candidates found', String(candidates.length));
+        const candidate = candidates[0];
+        if (!candidate) {
           if (!expanded) await ctx.logger.info('Facebook expand text button not found; text is already complete or unavailable');
           break;
         }
-        const label = button.getAttribute('aria-label') || this.text(button);
-        await ctx.logger.info(`Facebook expand text button found: ${label}`, `attempt=${attempt}/3`);
-        await ctx.logger.info('Facebook text length before expand', String(beforeText.length));
-        const clicked = await ctx.navigation.click(this.clickable(button), `Facebook expand text: ${label}`, { scroll: false });
+        tried.add(candidate.clickable);
+        await ctx.logger.info('Facebook Expand candidate text', candidate.label);
+        const beforeNode = this.messageNode(article) || article;
+        const beforeText = this.text(beforeNode);
+        const beforeHeight = beforeNode.getBoundingClientRect().height;
+        const clicked = await ctx.navigation.click(candidate.clickable, `Facebook expand text: ${candidate.label}`, { scroll: false });
         if (!clicked) {
-          await ctx.logger.warn('Facebook expand text click was not performed');
+          await ctx.logger.warn('Facebook Expand failed, trying next candidate', `attempt=${attempt}/5`);
           continue;
         }
+        await ctx.logger.info('Facebook Clicked expand candidate via parent', candidate.clickable.tagName || candidate.clickable.getAttribute('role') || 'unknown');
         const changed = await app.utils.waitFor(() => {
-          const currentText = this.text(this.messageNode(article) || article);
-          return currentText.length > beforeText.length || !button.isConnected || !app.utils.isVisible(button);
+          const current = this.messageNode(article) || article;
+          return this.text(current).length > beforeText.length || current.getBoundingClientRect().height > beforeHeight + 2 || !candidate.clickable.isConnected;
         }, { timeoutMs: 5000, intervalMs: 250, token: ctx.token });
-        const afterText = this.text(this.messageNode(article) || article);
-        await ctx.logger.info('Facebook text length after expand', String(afterText.length));
-        if (!changed) await ctx.logger.warn('Facebook text did not change after expand click');
-        else expanded = true;
+        const afterNode = this.messageNode(article) || article;
+        const afterText = this.text(afterNode);
+        await ctx.logger.info('Facebook Text length before/after', `${beforeText.length} -> ${afterText.length}`);
+        if (!changed || afterText.length <= beforeText.length) {
+          await ctx.logger.warn('Facebook Expand failed, trying next candidate', `attempt=${attempt}/5`);
+          continue;
+        }
+        expanded = true;
       }
       return expanded;
     }
@@ -420,37 +487,49 @@
       return parsed ? { value: text, element, score, source, parsed } : null;
     }
 
-    facebookHeaderMetaArea(article) {
+    facebookHeaderMetaArea(article, permalink = null) {
       const articleRect = article.getBoundingClientRect();
-      const message = this.messageNode(article);
       const inHeaderBand = (element) => {
         const rect = element.getBoundingClientRect();
-        return rect.top >= articleRect.top - 20 && rect.top <= articleRect.top + Math.min(280, articleRect.height * 0.35);
+        return rect.top >= articleRect.top - 30 && rect.top <= articleRect.top + Math.min(320, Math.max(180, articleRect.height * 0.4));
       };
-      const postLinks = this.allVisible('a[href]', article).filter((link) => {
-        const text = this.text(link);
-        return inHeaderBand(link) && text.length <= 80 && this.normalizePostUrl(link.href) && !link.querySelector('img, video');
-      });
+      const postLinks = Array.from(new Set([
+        permalink,
+        ...this.permalinkAnchors(article).filter((candidate) => !candidate.media && candidate.compact).map((candidate) => candidate.link)
+      ].filter(Boolean))).filter(inHeaderBand);
+      const separators = this.allVisible('span, div', article).filter((element) => inHeaderBand(element) && this.text(element) === '·');
       const publicIndicators = this.allVisible('[aria-label], svg title', article).filter((element) => {
         const label = app.utils.normalizeText(element.getAttribute('aria-label') || this.text(element));
-        return inHeaderBand(element) && /(shared with public|public visibility|доступно всем|общедоступно|herkese açık|herkese acik)/i.test(label);
+        return inHeaderBand(element) && /(shared with|public visibility|public|friends|only me|доступно|общедоступно|друзья|видно|herkese|arkadaş|arkadas)/i.test(label);
       });
       const authorLinks = this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', article)
         .filter((link) => inHeaderBand(link) && this.text(link) && !this.normalizePostUrl(link.href));
-      const seeds = [...postLinks, ...publicIndicators.map((element) => element.closest('[aria-label], span, a, div') || element), ...authorLinks];
+      const seeds = [...postLinks, ...separators, ...publicIndicators.map((element) => element.closest('[aria-label], span, a, div') || element), ...authorLinks];
       let best = null;
       for (const seed of seeds) {
         let current = seed;
-        for (let depth = 0; current && current !== article && depth < 8; depth++, current = current.parentElement) {
+        for (let depth = 0; current && depth < 10; depth++, current = current.parentElement) {
           const rect = current.getBoundingClientRect();
-          if (!inHeaderBand(current) || rect.height < 8 || rect.height > 260) continue;
-          if (message && (current === message || current.contains(message))) continue;
+          if (!inHeaderBand(current) || rect.height < 8 || rect.height > 240) {
+            if (current === article) break;
+            continue;
+          }
           const hasPostLink = postLinks.some((element) => current.contains(element));
+          const hasSeparator = separators.some((element) => current.contains(element));
           const hasPublic = publicIndicators.some((element) => current.contains(element));
           const hasAuthor = authorLinks.some((element) => current.contains(element));
-          if (!hasPostLink && !hasPublic) continue;
-          const score = (hasPostLink ? 8 : 0) + (hasPublic ? 6 : 0) + (hasAuthor ? 3 : 0) - rect.height / 300;
+          const signalCount = [hasPostLink, hasSeparator, hasPublic, hasAuthor].filter(Boolean).length;
+          if (signalCount < 2 && !hasPostLink) continue;
+          const score = (hasPostLink ? 10 : 0) + (hasSeparator ? 7 : 0) + (hasPublic ? 7 : 0) + (hasAuthor ? 4 : 0) - rect.height / 300;
           if (!best || score > best.score || (score === best.score && rect.height < best.rect.height)) best = { element: current, score, rect };
+          if (current === article) break;
+        }
+      }
+      if (!best && postLinks[0]) {
+        let current = postLinks[0].parentElement;
+        for (let depth = 0; current && current !== article && depth < 5; depth++, current = current.parentElement) {
+          const rect = current.getBoundingClientRect();
+          if (inHeaderBand(current) && rect.height <= 180) return current;
         }
       }
       return best?.element || null;
@@ -462,29 +541,40 @@
       if (message?.contains(element)) return true;
       if (element.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"], [role="tooltip"]')) return true;
       const text = this.text(element);
-      return text.length > 80 || isMediaTooltipText(text);
+      const label = app.utils.normalizeText(`${element.getAttribute('aria-label') || ''} ${text}`);
+      return text.length > 80 || isMediaTooltipText(label) || /(shared with|public visibility|see more|read more|show more|показать больше)/i.test(label);
     }
 
-    headerDateCandidates(article, header) {
-      if (!header) return [];
+    headerDateCandidates(article, header, permalink = null) {
+      const scope = header || article;
+      const articleRect = article.getBoundingClientRect();
+      const topLimit = articleRect.top + Math.min(320, Math.max(180, articleRect.height * 0.4));
+      const separators = this.allVisible('span, div', scope).filter((element) => this.text(element) === '·');
+      const visibility = this.allVisible('[aria-label], svg title', scope).filter((element) => {
+        const label = app.utils.normalizeText(element.getAttribute('aria-label') || this.text(element));
+        return /(shared with|public visibility|public|friends|only me|доступно|общедоступно|друзья|herkese|arkadaş|arkadas)/i.test(label);
+      });
+      const near = (element, signals, maxX = 180) => {
+        const rect = element.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        return signals.some((signal) => {
+          const signalRect = signal.getBoundingClientRect();
+          return Math.abs(centerY - (signalRect.top + signalRect.height / 2)) <= 45 && Math.abs(centerX - (signalRect.left + signalRect.width / 2)) <= maxX;
+        });
+      };
       const definitions = [
-        ['[data-utime]', 1000],
-        ['time', 950],
-        ['abbr', 900],
-        ['a[href*="/posts/"]', 880],
-        ['a[href*="/permalink/"]', 880],
-        ['a[href*="story_fbid"]', 870],
-        ['a[href*="fbid="]', 850],
-        ['a[href*="/videos/"]', 820],
-        ['a[href*="/photo"]', 780],
-        ['[aria-label]', 700],
-        ['span', 400]
+        ['[data-utime]', 1000], ['time', 950], ['abbr', 900], ['a[href]', 800], ['[role="link"]', 700], ['[aria-label]', 650], ['span', 400]
       ];
       const found = [];
       for (const [selector, priority] of definitions) {
-        const elements = [header, ...header.querySelectorAll(selector)].filter((element) => element.matches?.(selector));
+        const elements = [scope, ...scope.querySelectorAll(selector)].filter((element) => element.matches?.(selector));
         for (const element of elements) {
           if (!app.utils.isVisible(element) || this.rejectedDateElement(element, article)) continue;
+          if (element.closest('h1, h2, h3, h4, strong, button, [role="button"]')) continue;
+          const rect = element.getBoundingClientRect();
+          if (rect.top > topLimit || rect.height > 70 || rect.width > 420) continue;
+          if (this.text(element) === '·') continue;
           const values = [
             element.getAttribute('data-utime'),
             element.getAttribute('datetime'),
@@ -494,9 +584,14 @@
           ].filter((value) => String(value).trim().length > 0 && String(value).trim().length <= 80);
           const hasDateValue = values.some(hasTemporalEvidence);
           const postUrl = element.matches('a[href]') ? this.normalizePostUrl(element.href) : '';
-          if (!hasDateValue && !postUrl) continue;
-          if (postUrl && /\/(photo|photos)\//i.test(new URL(postUrl).pathname) && !hasDateValue) continue;
-          found.push({ element, selector, priority: priority + (hasDateValue ? 100 : 0), values });
+          const mediaLink = !!element.querySelector('img, video') || !!element.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"]');
+          const nearSeparator = near(element, separators);
+          const nearVisibility = near(element, visibility, 240);
+          const isPermalink = element === permalink || (!!postUrl && !mediaLink);
+          if (!hasDateValue && !isPermalink && !nearSeparator && !nearVisibility) continue;
+          if (postUrl && /\/(photo|photos)\//i.test(new URL(postUrl).pathname) && !hasDateValue && !nearSeparator && !nearVisibility) continue;
+          const score = priority + (hasDateValue ? 180 : 0) + (isPermalink ? 140 : 0) + (nearSeparator ? 80 : 0) + (nearVisibility ? 60 : 0) - values.join(' ').length;
+          found.push({ element, selector, priority: score, values });
         }
       }
       const unique = new Map();
@@ -563,13 +658,16 @@
       return null;
     }
 
-    async parseFacebookDateFromHeaderHover(article, ctx) {
-      const header = this.facebookHeaderMetaArea(article);
+    async findAndHoverFacebookDateElement(article, ctx, postUrl = '') {
+      const context = this.resolvePostContext(article);
+      const postElement = context.postElement || article;
+      const permalink = context.permalink || this.permalinkAnchors(postElement, postUrl)[0]?.link || null;
+      const header = this.facebookHeaderMetaArea(postElement, permalink);
       await ctx.logger.info('Facebook Header/meta area found', String(!!header));
-      const candidates = this.headerDateCandidates(article, header);
+      const candidates = this.headerDateCandidates(postElement, header, permalink);
       await ctx.logger.info('Facebook Date candidates in header', String(candidates.length));
-      await ctx.logger.info('Facebook Date candidates outside header ignored', String(this.outsideHeaderDateCandidateCount(article, header)));
-      for (const candidate of candidates.slice(0, 6)) {
+      await ctx.logger.info('Facebook Date candidates outside header ignored', String(this.outsideHeaderDateCandidateCount(postElement, header)));
+      for (const candidate of candidates.slice(0, 10)) {
         const hovered = await this.hoverHeaderDateCandidate(candidate.element, candidate.selector, ctx);
         if (hovered) return app.utils.formatTimestamp(hovered.parsed);
         for (const value of candidate.values) {
@@ -585,6 +683,10 @@
         }
       }
       return null;
+    }
+
+    async parseFacebookDateFromHeaderHover(article, ctx, postUrl = '') {
+      return this.findAndHoverFacebookDateElement(article, ctx, postUrl);
     }
 
     async resolveDateFromPermalink(postUrl, ctx) {
@@ -622,7 +724,7 @@
     }
 
     async extractDate(article, ctx, postUrl = '') {
-      const headerDate = await this.parseFacebookDateFromHeaderHover(article, ctx);
+      const headerDate = await this.parseFacebookDateFromHeaderHover(article, ctx, postUrl);
       if (headerDate) {
         await ctx.logger.info('Facebook Date parse result', headerDate);
         return new Date(headerDate);
@@ -673,7 +775,7 @@
         const rect = current.getBoundingClientRect();
         if (rect.height > 140 && rect.height < 4200 && rect.width > 280) {
           const hasPermalink = Array.from(current.querySelectorAll('a[href]')).some((link) => this.normalizePostUrl(link.href));
-          const hasContent = !!this.messageNode(current) || !!current.querySelector('time, [data-utime]');
+          const hasContent = !!this.messageNode(current) || !!current.querySelector('time, [data-utime], img[src], video');
           if (hasPermalink && hasContent) return current;
         }
         if (rect.height >= 5000) break;
@@ -738,34 +840,36 @@
 
     async parseArticle(article, ctx) {
       if (this.isAdvertisement(article)) return { advertisement: true };
-      const postUrl = this.postUrlForArticle(article);
+      const context = this.resolvePostContext(article);
+      const postElement = context.postElement || article;
+      const postUrl = context.postUrl;
       await ctx.logger.info('Facebook Post URL', postUrl || 'unavailable');
       await ctx.logger.info('Facebook Date limit enabled', String(!!ctx.state.dateLimit));
       if (!postUrl) {
         await ctx.logger.warn('Facebook Post saved/skipped reason', 'skipped: post URL unavailable');
         return null;
       }
-      await this.expandPostText(article, ctx);
-      let textResult = this.extractPostText(article);
+      await this.expandPostText(postElement, ctx);
+      let textResult = this.extractPostText(postElement);
       if (!textResult.text) {
         await ctx.logger.warn('Facebook post text is empty after primary extraction; retrying expand and alternate container extraction', postUrl);
-        await this.expandPostText(article, ctx);
-        textResult = this.extractPostText(article, { broad: true });
+        await this.expandPostText(postElement, ctx);
+        textResult = this.extractPostText(postElement, { broad: true });
       }
       if (textResult.text) await ctx.logger.info('Facebook post text extracted', `source=${textResult.source}, length=${textResult.text.length}`);
       else await ctx.logger.warn('Facebook post genuinely has no text; saving without synthetic text', postUrl);
 
-      const postDate = await this.extractDate(article, ctx, postUrl);
+      const postDate = await this.extractDate(postElement, ctx, postUrl);
       if (!postDate && ctx.state.dateLimit) {
         await ctx.logger.warn('Facebook Post saved/skipped reason', 'skipped: date unavailable while date limit is enabled');
         return null;
       }
       if (!postDate) await ctx.logger.warn('Facebook date unavailable; post will be saved with postDate=null because date limit is disabled', postUrl);
-      const authorLink = this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', article)
+      const authorLink = this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', postElement)
         .find((link) => !this.normalizePostUrl(link.href) && this.text(link));
       const mediaUrls = [
-        ...Array.from(article.querySelectorAll('img[src]')).filter((image) => image.width > 150 || image.naturalWidth > 150).map((image) => image.currentSrc || image.src),
-        ...Array.from(article.querySelectorAll('video')).map((video) => video.poster || video.src)
+        ...Array.from(postElement.querySelectorAll('img[src]')).filter((image) => image.width > 150 || image.naturalWidth > 150).map((image) => image.currentSrc || image.src),
+        ...Array.from(postElement.querySelectorAll('video')).map((video) => video.poster || video.src)
       ].filter(Boolean);
       return {
         postDate: postDate ? app.utils.formatTimestamp(postDate) : null,
