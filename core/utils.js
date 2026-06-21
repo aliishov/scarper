@@ -97,8 +97,8 @@
   function parseUserDate(value) {
     const text = String(value || '').trim();
     if (!text) return { value: null, error: null };
-    const match = text.match(/^(\d{2})_(\d{2})_(\d{4})$/);
-    if (!match) return { value: null, error: 'Используйте формат DD_MM_YYYY.' };
+    const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return { value: null, error: 'Используйте формат DD/MM/YYYY.' };
     const day = Number(match[1]);
     const month = Number(match[2]);
     const year = Number(match[3]);
@@ -107,6 +107,20 @@
       return { value: null, error: 'Указана несуществующая дата.' };
     }
     return { value: `${match[3]}-${match[2]}-${match[1]}`, error: null };
+  }
+
+  function formatDateMask(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+    if (digits.length < 2) return digits;
+    if (digits.length === 2) return `${digits}/`;
+    if (digits.length < 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    if (digits.length === 4) return `${digits.slice(0, 2)}/${digits.slice(2)}/`;
+    return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+  }
+
+  function displayDateFromIso(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : '';
   }
 
   function localDateKey(value) {
@@ -205,6 +219,8 @@
     normalizeText,
     absoluteUrl,
     parseUserDate,
+    formatDateMask,
+    displayDateFromIso,
     localDateKey,
     isBeforeDateLimit,
     formatTimestamp,

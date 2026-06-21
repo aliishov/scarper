@@ -39,12 +39,20 @@ for (const file of [
 
 const app = globalThis.ScraperApp;
 
-test('DD_MM_YYYY validation is strict and date-only', () => {
-  assert.deepEqual(app.utils.parseUserDate('15_05_2026'), { value: '2026-05-15', error: null });
-  assert.equal(app.utils.parseUserDate('31_02_2026').value, null);
+test('DD/MM/YYYY validation is strict and date-only', () => {
+  assert.deepEqual(app.utils.parseUserDate('15/05/2026'), { value: '2026-05-15', error: null });
+  assert.equal(app.utils.parseUserDate('31/02/2026').value, null);
   assert.equal(app.utils.parseUserDate('2026-05-15').value, null);
   assert.equal(app.utils.isBeforeDateLimit('2026-05-14T23:59:59+04:00', '2026-05-15'), true);
   assert.equal(app.utils.isBeforeDateLimit('2026-05-15T00:00:01+04:00', '2026-05-15'), false);
+});
+
+test('date mask inserts slashes and calendar values use DD/MM/YYYY', () => {
+  assert.equal(app.utils.formatDateMask('2'), '2');
+  assert.equal(app.utils.formatDateMask('21'), '21/');
+  assert.equal(app.utils.formatDateMask('2106'), '21/06/');
+  assert.equal(app.utils.formatDateMask('21a06-2026'), '21/06/2026');
+  assert.equal(app.utils.displayDateFromIso('2026-06-21'), '21/06/2026');
 });
 
 test('result filename follows source_result_DD_MM_YYYY.jsonl', () => {

@@ -20,7 +20,7 @@
 
   const elements = Object.fromEntries([
     'langSelect', 'platform', 'keywords', 'limitCountToggle', 'count', 'infiniteLoopToggle', 'dateLimitToggle', 'dateLimit',
-    'sendToServerToggle', 'saveToPCToggle', 'authUsername', 'authPassword', 'error', 'status', 'start', 'stop', 'skip', 'logs'
+    'datePicker', 'sendToServerToggle', 'saveToPCToggle', 'authUsername', 'authPassword', 'error', 'status', 'start', 'stop', 'skip', 'logs'
   ].map((id) => [id, document.getElementById(id)]));
   let language = localStorage.getItem('scraperLanguage') || 'ru';
   let currentState = null;
@@ -76,6 +76,9 @@
     if (elements.limitCountToggle.checked) {
       targetCount = Number(elements.count.value);
       if (!Number.isInteger(targetCount) || targetCount < 1) throw new Error(language === 'ru' ? 'Количество постов должно быть целым числом больше нуля.' : 'Post sayı sıfırdan böyük tam ədəd olmalıdır.');
+    }
+    if (elements.dateLimitToggle.checked && !elements.dateLimit.value.trim()) {
+      throw new Error(language === 'ru' ? 'Выберите или введите дату в формате DD/MM/YYYY.' : 'Tarixi seçin və ya DD/MM/YYYY formatında daxil edin.');
     }
     const parsedDate = elements.dateLimitToggle.checked ? app.utils.parseUserDate(elements.dateLimit.value) : { value: null, error: null };
     if (parsedDate.error) throw new Error(parsedDate.error);
@@ -175,7 +178,27 @@
   });
 
   elements.limitCountToggle.addEventListener('change', () => { elements.count.disabled = !elements.limitCountToggle.checked; });
-  elements.dateLimitToggle.addEventListener('change', () => { elements.dateLimit.disabled = !elements.dateLimitToggle.checked; });
+  elements.dateLimitToggle.addEventListener('change', () => {
+    const disabled = !elements.dateLimitToggle.checked;
+    elements.dateLimit.disabled = disabled;
+    elements.datePicker.disabled = disabled;
+    if (!disabled) elements.dateLimit.focus();
+  });
+  elements.dateLimit.addEventListener('keydown', (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const allowed = ['Backspace', 'Delete', 'Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!/^\d$/.test(event.key) && !allowed.includes(event.key)) event.preventDefault();
+  });
+  elements.dateLimit.addEventListener('input', () => {
+    const masked = app.utils.formatDateMask(elements.dateLimit.value);
+    elements.dateLimit.value = masked;
+    const parsed = app.utils.parseUserDate(masked);
+    if (parsed.value) elements.datePicker.value = parsed.value;
+  });
+  elements.datePicker.addEventListener('change', () => {
+    elements.dateLimit.value = app.utils.displayDateFromIso(elements.datePicker.value);
+    showError();
+  });
   elements.langSelect.addEventListener('change', () => {
     language = elements.langSelect.value;
     localStorage.setItem('scraperLanguage', language);
