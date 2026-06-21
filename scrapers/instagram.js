@@ -30,16 +30,22 @@
     }
 
     searchInput() {
-      return this.visible('input[aria-label*="Search input" i], input[placeholder*="Search" i], input[aria-label*="Search" i], input[placeholder*="Поиск" i], input[aria-label*="Поиск" i], input[name="queryBox"]');
+      return this.visible('input[aria-label*="Search input" i], input[placeholder*="Search" i], input[aria-label*="Search" i], input[placeholder*="Поиск" i], input[aria-label*="Поиск" i], input[name="queryBox"], input[type="search"]');
     }
 
     async openSearch(ctx) {
-      const controls = this.allVisible('a, button, [role="button"]');
+      const rawControls = this.allVisible('a, button, [role="button"], svg[aria-label]');
+      const controls = Array.from(new Set(rawControls.map((element) => this.clickable(element)).filter(Boolean)));
+      await ctx.logger.info(`Instagram visible search controls: ${controls.length}`);
       const control = controls.find((element) => {
         const labels = [element.getAttribute('aria-label'), this.text(element)].map(app.utils.normalizeText).filter(Boolean);
         return labels.some((label) => /^(search|поиск|axtarış|axtaris)$/.test(label));
       });
-      if (!control) return false;
+      if (!control) {
+        await ctx.logger.warn('Instagram Search navigation control was not found');
+        return false;
+      }
+      await ctx.logger.info('Instagram Search navigation control found');
       return ctx.navigation.click(control, 'Instagram Search navigation');
     }
 
@@ -64,6 +70,8 @@
     }
 
     async search(keyword, ctx) {
+      await ctx.logger.info(`Instagram search started: ${keyword}`);
+      await ctx.logger.info(`Instagram search input visible before opening UI: ${!!this.searchInput()}`);
       if (!this.resultsMatch(keyword)) {
         const result = await ctx.navigation.search({
           platform: 'Instagram',
@@ -82,6 +90,7 @@
       } else {
         await ctx.logger.info('Existing Instagram results match keyword');
       }
+      await ctx.logger.info(`Instagram results confirmed for keyword: ${keyword}`);
       await this.tryFreshUi(ctx);
       return { success: true };
     }
@@ -128,12 +137,23 @@
         element = Array.from(document.querySelectorAll('a[href]')).find((link) => link.href.split('?')[0] === candidate.postUrl.split('?')[0]);
       }
       if (!element) return null;
+      await ctx.logger.info('Instagram opening post card', candidate.postUrl);
       await ctx.navigation.click(element, 'Instagram post card');
-      return app.utils.waitFor(() => document.querySelector('div[role="dialog"] article, div[role="dialog"]'), {
+      const container = await app.utils.waitFor(() => document.querySelector('div[role="dialog"] article, div[role="dialog"]'), {
         timeoutMs: 6000,
         intervalMs: 250,
         token: ctx.token
       });
+      if (!container) return null;
+      const ready = await app.utils.waitFor(() => {
+        const hasDate = !!container.querySelector('time[datetime], time[title]');
+        const hasIdentity = !!this.profileLink(container);
+        const hasMedia = !!container.querySelector('img[src], video');
+        return hasDate && (hasIdentity || hasMedia);
+      }, { timeoutMs: 7000, intervalMs: 300, token: ctx.token });
+      if (!ready) await ctx.logger.warn('Instagram modal opened but did not become fully ready', candidate.postUrl);
+      else await ctx.logger.info('Instagram post modal is ready', candidate.postUrl);
+      return container;
     }
 
     profileLink(container) {
@@ -145,17 +165,54 @@
       }) || null;
     }
 
+    parsePostDate(container) {
+      const elements = Array.from(container.querySelectorAll('time[datetime], time[title], time'));
+      for (const element of elements) {
+        for (const value of [element.getAttribute('datetime'), element.getAttribute('title'), element.getAttribute('aria-label')]) {
+          if (!value) continue;
+          const date = new Date(value);
+          if (!Number.isNaN(date.getTime())) return date;
+        }
+      }
+      return null;
+    }
+
+    async expandPostText(container, ctx) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const before = this.text(container);
+        const button = this.allVisible('button, [role="button"], span', container).find((element) => {
+          const value = app.utils.normalizeText(element.getAttribute('aria-label') || this.text(element));
+          return /^(more|see more|ещё|еще|показать больше|daha çox|daha cox)$/.test(value);
+        });
+        if (!button) return attempt > 1;
+        await ctx.logger.info(`Instagram expand caption attempt ${attempt}/3`, this.text(button));
+        await ctx.navigation.click(this.clickable(button), 'Instagram expand caption');
+        const changed = await app.utils.waitFor(() => this.text(container).length > before.length || !button.isConnected, {
+          timeoutMs: 3500,
+          intervalMs: 250,
+          token: ctx.token
+        });
+        if (changed) await ctx.logger.info('Instagram caption expanded', `${before.length} -> ${this.text(container).length}`);
+        else await ctx.logger.warn('Instagram caption length did not change after expand click');
+      }
+      return true;
+    }
+
     parsePost(container, postUrl) {
       if (this.isAdvertisement(container)) return { advertisement: true };
-      const time = container.querySelector('time[datetime]');
-      const date = time ? new Date(time.getAttribute('datetime')) : null;
-      if (!date || Number.isNaN(date.getTime())) return null;
+      const date = this.parsePostDate(container);
+      if (!date) return null;
       const profile = this.profileLink(container);
       let handle = '';
       try { handle = new URL(profile?.href || '').pathname.split('/').filter(Boolean)[0] || ''; } catch (error) {}
       const author = this.text(profile?.querySelector('span')) || this.text(profile) || handle || 'Unknown';
-      const captionNodes = this.allVisible('h1[dir="auto"], ul li span[dir="auto"], article span[dir="auto"]', container)
-        .filter((node) => this.text(node) && this.text(node) !== author && this.text(node) !== handle);
+      const captionNodes = this.allVisible('h1[dir="auto"], [data-testid="post-comment-root"] span[dir="auto"], ul li span[dir="auto"], article span[dir="auto"]', container)
+        .filter((node) => {
+          const value = this.text(node);
+          if (!value || value === author || value === handle) return false;
+          if (/^(like|reply|see translation|нравится|ответить|перевод)$/i.test(value)) return false;
+          return !node.closest('time');
+        });
       const text = this.text(captionNodes.sort((left, right) => this.text(right).length - this.text(left).length)[0]);
       const mediaUrls = [
         ...Array.from(container.querySelectorAll('img[src]')).filter((image) => !/profile picture/i.test(image.alt || '') && (image.width > 180 || image.naturalWidth > 180)).map((image) => image.currentSrc || image.src),
@@ -171,11 +228,18 @@
       };
     }
 
+    shouldSkipPost(post) {
+      return !post || post.advertisement === true || !post.postUrl || !post.postDate;
+    }
+
     async closePost(ctx) {
       const close = this.visible('div[role="dialog"] button[aria-label*="Close" i], button[aria-label="Close"], button[aria-label="Закрыть"], svg[aria-label="Close"], svg[aria-label="Закрыть"]');
       if (close) await ctx.navigation.click(this.clickable(close), 'Instagram Close post');
       else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
-      await app.utils.waitFor(() => !document.querySelector('div[role="dialog"]'), { timeoutMs: 3500, intervalMs: 200, token: ctx.token });
+      const closed = await app.utils.waitFor(() => !document.querySelector('div[role="dialog"]'), { timeoutMs: 3500, intervalMs: 200, token: ctx.token });
+      if (closed) await ctx.logger.info('Instagram post modal closed; returning to result list');
+      else await ctx.logger.warn('Instagram post modal did not close cleanly');
+      return !!closed;
     }
 
     async collect(ctx) {
@@ -191,7 +255,6 @@
       }
       await ctx.logger.info(`Instagram unique post candidates: ${candidates.length}`);
 
-      const buffered = [];
       for (const candidate of candidates) {
         ctx.token.throwIfCancelled();
         const container = await this.openPost(candidate, ctx);
@@ -199,19 +262,26 @@
           await ctx.logger.warn('Instagram card did not open', candidate.postUrl);
           continue;
         }
+        await this.expandPostText(container, ctx);
         const post = this.parsePost(container, candidate.postUrl);
-        if (post?.advertisement) await ctx.logger.info('Instagram sponsored post skipped', candidate.postUrl);
-        else if (post) buffered.push(post);
-        else await ctx.logger.warn('Instagram post skipped: date unavailable', candidate.postUrl);
+        let outcome = null;
+        if (post?.advertisement) {
+          await ctx.logger.info('Instagram sponsored post skipped', candidate.postUrl);
+        } else if (post) {
+          await ctx.logger.info('Instagram post parsed', `${post.author} | ${post.postDate} | ${post.postUrl}`);
+          outcome = await ctx.onPost(post);
+        } else {
+          await ctx.logger.warn('Instagram post skipped: publication date was not resolved', candidate.postUrl);
+        }
         await this.closePost(ctx);
-      }
-
-      buffered.sort((left, right) => new Date(right.postDate).getTime() - new Date(left.postDate).getTime());
-      await ctx.logger.info(`Instagram posts sorted newest first: ${buffered.length}`);
-      for (const post of buffered) {
-        const outcome = await ctx.onPost(post);
-        if (outcome.limitReached) return { reason: 'target' };
-        if (outcome.older) return { reason: 'date-limit' };
+        if (outcome?.limitReached) {
+          await ctx.logger.info(`Instagram keyword limit reached: ${ctx.currentCount()}/${ctx.targetCount}`);
+          return { reason: 'target' };
+        }
+        if (outcome?.older) {
+          await ctx.logger.info('Instagram date limit reached; finishing current keyword', post.postDate);
+          return { reason: 'date-limit' };
+        }
       }
       return { reason: 'exhausted' };
     }
