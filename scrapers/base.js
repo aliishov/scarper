@@ -16,7 +16,32 @@
   class BaseScraper {
     constructor(platform) {
       this.platform = platform;
+      this.stopped = false;
     }
+
+    async ensureReady() { return true; }
+
+    async searchKeyword(keyword, context) {
+      if (typeof this.search !== 'function') return { success: true };
+      return this.search(keyword, context);
+    }
+
+    async scrapePosts(context) {
+      if (typeof this.collect !== 'function') return { reason: 'not-implemented' };
+      return this.collect(context);
+    }
+
+    parsePost() { return null; }
+
+    async expandPostText() { return false; }
+
+    parsePostDate() { return null; }
+
+    shouldSkipPost(post) { return !post; }
+
+    stop() { this.stopped = true; }
+
+    async cleanup() { this.stopped = false; }
 
     text(element) {
       return String(element?.innerText || element?.textContent || '').replace(/\s+/g, ' ').trim();

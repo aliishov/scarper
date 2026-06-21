@@ -96,16 +96,23 @@ async function handleMessage(request, sender) {
       return { success: true, state: await stateRepository.get() };
     }
     case 'state:initialize': {
-      const state = await exclusive(async () => {
+      const { state, previous } = await exclusive(async () => {
         const previous = await stateRepository.get();
-        if (previous?.runId && previous.runId !== request.state.runId) {
-          await serverQueue.cancelRun(previous.runId);
-          await resultDownloads.cleanupRun(previous.runId);
-          await stateRepository.clearSecrets(previous.runId);
-        }
-        await resultDownloads.cleanupRun(request.state.runId);
-        return stateRepository.initialize(request.state, request.secrets || {});
+        const state = await stateRepository.initialize(request.state, request.secrets || {});
+        return { state, previous };
       });
+      if (previous?.runId && previous.runId !== request.state.runId) {
+        void Promise.allSettled([
+          serverQueue.cancelRun(previous.runId),
+          resultDownloads.cleanupRun(previous.runId),
+          stateRepository.clearSecrets(previous.runId)
+        ]).then(async (results) => {
+          const failures = results.filter((result) => result.status === 'rejected');
+          if (failures.length) {
+            await appendLog(request.state.runId, 'warn', 'Previous run cleanup was incomplete', failures.map((result) => result.reason?.message).join('; '));
+          }
+        });
+      }
       return { success: true, state };
     }
     case 'state:patch': {

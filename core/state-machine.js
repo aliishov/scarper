@@ -26,6 +26,8 @@
     }
 
     stop(reason = 'stop') {
+      const activePlatform = this.currentPlatform;
+      if (activePlatform && app.scrapers[activePlatform]) app.scrapers[activePlatform].stop();
       this.keywordToken?.cancel(reason);
       this.sessionToken?.cancel(reason);
       try { window.scrollTo({ top: window.scrollY, behavior: 'auto' }); } catch (error) {}
@@ -54,6 +56,7 @@
         if (!state || state.runId !== runId || !state.active || state.requestedAction === 'stop') return;
         const scraper = app.scrapers[state.platform];
         if (!scraper) throw new Error(`Unsupported platform: ${state.platform}`);
+        this.currentPlatform = state.platform;
         const logger = new app.Logger(runId, state.platform);
 
         if (state.requestedAction === 'skip') {
@@ -80,7 +83,7 @@
           if (!ready) throw new Error(`${state.platform} login is required`);
 
           state = await this.transition(state, 'searching', { requestedAction: null });
-          const searchResult = await scraper.search(keyword, {
+          const searchResult = await scraper.searchKeyword(keyword, {
             state,
             logger,
             navigation,
@@ -132,7 +135,7 @@
             };
           };
 
-          const result = await scraper.collect({
+          const result = await scraper.scrapePosts({
             state,
             runId,
             keyword,
@@ -145,6 +148,7 @@
             onPost
           });
           await logger.info(`Keyword collection finished: ${keyword}`, result?.reason || 'completed');
+          await scraper.cleanup();
           state = await app.storage.getState();
           if (!state?.active) return;
           const continued = await this.advanceKeyword(state, logger, result?.reason || 'completed');
@@ -153,6 +157,7 @@
         } catch (error) {
           if (!(error instanceof app.utils.CancellationError)) throw error;
           if (error.reason === 'skip') {
+            await scraper.cleanup();
             state = await app.storage.getState();
             if (!state?.active) return;
             await logger.info(`Keyword skipped immediately: ${keyword}`);

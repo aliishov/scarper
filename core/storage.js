@@ -2,9 +2,13 @@
   'use strict';
 
   async function send(action, payload = {}) {
-    const response = await chrome.runtime.sendMessage({ action, ...payload });
-    if (!response?.success) throw new Error(response?.error || `${action} failed`);
-    return response;
+    try {
+      const response = await chrome.runtime.sendMessage({ action, ...payload });
+      if (!response?.success) throw new Error(response?.error || 'Background returned no success response');
+      return response;
+    } catch (error) {
+      throw new Error(`${action} failed: ${error.message}`, { cause: error });
+    }
   }
 
   app.storage = Object.freeze({

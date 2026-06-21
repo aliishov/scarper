@@ -28,7 +28,9 @@ for (const file of [
   'core/storage.js',
   'core/server.js',
   'scrapers/base.js',
+  'scrapers/twitter.js',
   'scrapers/facebook.js',
+  'scrapers/instagram.js',
   'scrapers/tiktok.js'
 ]) {
   require(path.join(root, file));
@@ -132,4 +134,16 @@ test('state repository serializes concurrent writes and rejects stale runs', asy
   assert.equal(state.logs.length, 50);
   assert.equal(state.revision, 52);
   assert.equal(await repository.patch('stale-run', { active: true }), null);
+});
+
+test('all platform scrapers implement the shared public contract', () => {
+  const methods = [
+    'ensureReady', 'searchKeyword', 'scrapePosts', 'parsePost', 'expandPostText',
+    'parsePostDate', 'shouldSkipPost', 'stop', 'cleanup'
+  ];
+  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok']) {
+    for (const method of methods) {
+      assert.equal(typeof app.scrapers[platform][method], 'function', `${platform}.${method} must exist`);
+    }
+  }
 });
