@@ -1,435 +1,192 @@
+(function initializePopup(app) {
+  'use strict';
 
-const i18n = {
-  ru: {
-    title: "Multi platform scarper",
-    socialNetwork: "Социальная сеть:",
-    keywords: "Ключевые слова (каждое с новой строки):",
-    keywordsPlaceholder: "Например:\nmercedes\nbmw",
-    maxPosts: "Макс. постов на слово:",
-    infiniteLoop: "Бесконечный сбор (зациклить)",
-    timeLimit: "Ограничение по времени (собирать до)",
-    sendToServer: "Отправлять посты на сервер",
-    saveToPC: "Сохранять результаты в файл (на ПК)",
-    statusReady: "Готов к запуску",
-    startScraping: "Начать сбор",
-    stop: "Остановить",
-    skipKeyword: "Пропустить текущее слово",
-    logs: "Логи:",
-    alertKeywords: "Пожалуйста, введите хотя бы одно ключевое слово.",
-    statusInProgress: "В процессе",
-    statusStopped: "Остановлено / Ожидание",
-    startAgain: "Начать заново"
-  },
-  az: {
-    title: "Çoxplatformalı skreper",
-    socialNetwork: "Sosial şəbəkə:",
-    keywords: "Açar sözlər (hər biri yeni sətirdə):",
-    keywordsPlaceholder: "Məsələn:\nmercedes\nbmw",
-    maxPosts: "Hər söz üçün maksimum post:",
-    infiniteLoop: "Sonsuz toplama (dövrə sal)",
-    timeLimit: "Zaman məhdudiyyəti (qədər topla)",
-    sendToServer: "Postları serverə göndər",
-    saveToPC: "Nəticələri fayla yadda saxla (Kompüterə)",
-    statusReady: "Başlamağa hazırdır",
-    startScraping: "Toplamağa başla",
-    stop: "Dayandır",
-    skipKeyword: "Cari sözü atla",
-    logs: "Loqlar:",
-    alertKeywords: "Zəhmət olmasa, ən azı bir açar söz daxil edin.",
-    statusInProgress: "Prosesdə",
-    statusStopped: "Dayandırılıb / Gözləyir",
-    startAgain: "Yenidən başla"
-  }
-};
-
-let currentLang = localStorage.getItem('scraper_lang') || 'ru';
-
-function applyTranslations() {
-  document.getElementById('langSelect').value = currentLang;
-  const dict = i18n[currentLang];
-  document.querySelectorAll('[data-translate]').forEach(el => {
-    const key = el.getAttribute('data-translate');
-    if (dict[key]) {
-      el.innerText = dict[key];
+  const translations = {
+    ru: {
+      socialNetwork: 'Социальная сеть', keywords: 'Ключевые слова, каждое с новой строки', maxPosts: 'Ограничить количество постов на слово',
+      infiniteLoop: 'Бесконечный сбор', dateLimit: 'Не собирать посты старше даты', sendToServer: 'Отправлять посты на сервер',
+      saveToPC: 'Сохранять результаты в JSONL на ПК', auth: 'Данные входа используются только в текущей сессии браузера',
+      username: 'Логин или email', password: 'Пароль', ready: 'Готов к запуску', start: 'Начать сбор', stop: 'Остановить',
+      skip: 'Следующее слово', logs: 'Логи', stopped: 'Остановлено', completed: 'Завершено', running: 'Выполняется'
+    },
+    az: {
+      socialNetwork: 'Sosial şəbəkə', keywords: 'Açar sözlər, hər biri yeni sətirdə', maxPosts: 'Hər söz üçün post sayını məhdudlaşdır',
+      infiniteLoop: 'Sonsuz toplama', dateLimit: 'Bu tarixdən köhnə postları toplama', sendToServer: 'Postları serverə göndər',
+      saveToPC: 'Nəticələri JSONL kimi kompüterə yaz', auth: 'Giriş məlumatları yalnız cari brauzer sessiyasında istifadə olunur',
+      username: 'Login və ya email', password: 'Şifrə', ready: 'Başlamağa hazırdır', start: 'Toplamağa başla', stop: 'Dayandır',
+      skip: 'Növbəti söz', logs: 'Loqlar', stopped: 'Dayandırılıb', completed: 'Tamamlandı', running: 'İcra olunur'
     }
-  });
-  document.getElementById('keywords').placeholder = dict.keywordsPlaceholder;
-}
-
-function parseDateValue(value) {
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : null;
-}
-
-function sortPostsByDateDesc(posts) {
-  return (posts || []).slice().sort((a, b) => {
-    const bt = parseDateValue(b.date || b.scrapedAt);
-    const at = parseDateValue(a.date || a.scrapedAt);
-    return (bt || 0) - (at || 0);
-  });
-}
-
-function isReliableFacebookPostUrl(rawUrl) {
-  if (!rawUrl) return false;
-  try {
-    const url = new URL(rawUrl);
-    return /\/posts\/[^/]+/i.test(url.pathname)
-      || /\/permalink\//i.test(url.pathname)
-      || /\/groups\/[^/]+\/(posts|permalink)\/[^/]+/i.test(url.pathname)
-      || /\/(photos|videos|reel)\/[^/]+/i.test(url.pathname)
-      || /\/watch\//i.test(url.pathname)
-      || url.searchParams.has('story_fbid')
-      || url.searchParams.has('fbid');
-  } catch (error) {
-    return false;
-  }
-}
-
-function buildPostUrlKey(rawUrl, platform = '') {
-  if (!rawUrl) return '';
-  try {
-    const url = new URL(rawUrl);
-    const source = String(platform || '').toLowerCase();
-    if (source === 'twitter') {
-      const match = url.pathname.match(/\/status\/(\d+)/i);
-      return match ? `twitter:status:${match[1]}` : '';
-    }
-    if (source === 'instagram') {
-      const match = url.pathname.match(/\/(p|reel)\/([^/?#]+)/i);
-      return match ? `instagram:${match[1].toLowerCase()}:${match[2]}` : '';
-    }
-    if (source === 'tiktok') {
-      const match = url.pathname.match(/\/video\/(\d+)/i);
-      return match ? `tiktok:video:${match[1]}` : '';
-    }
-    if (source === 'facebook') {
-      if (!isReliableFacebookPostUrl(url.toString())) return '';
-      const storyId = url.searchParams.get('story_fbid') || url.searchParams.get('fbid');
-      const ownerId = url.searchParams.get('id') || '';
-      if (storyId) return `facebook:post:${storyId}:${ownerId}`;
-      return `facebook:${url.pathname.replace(/\/+$/, '').toLowerCase()}`;
-    }
-    url.search = '';
-    url.hash = '';
-    return url.toString().replace(/\/+$/, '');
-  } catch (error) {
-    return '';
-  }
-}
-
-function buildJsonlContent(allResults, fallbackPlatform = 'unknown') {
-  let output = '';
-  const emitted = new Set();
-  for (const result of allResults || []) {
-    const sortedPosts = sortPostsByDateDesc(result.posts || []);
-    for (const post of sortedPosts) {
-      const source = post.source || fallbackPlatform;
-      if ((source === 'facebook' || source === 'tiktok') && !parseDateValue(post.date)) continue;
-      const reliableUrl = source === 'facebook' && !isReliableFacebookPostUrl(post.url) ? '' : post.url;
-      const urlKey = buildPostUrlKey(post.url, source);
-      const uniqueKey = urlKey || post.id || `${result.keyword}:${source}:${post.author}:${post.date}:${post.text}`;
-      if (uniqueKey && emitted.has(uniqueKey)) continue;
-      if (uniqueKey) emitted.add(uniqueKey);
-      const line = {
-        keyword: result.keyword,
-        scrapedAt: post.scrapedAt || result.timestamp,
-        source,
-        ...post
-      };
-      if (source === 'facebook' && !reliableUrl) line.url = null;
-      output += JSON.stringify(line) + '\n';
-    }
-  }
-  return output;
-}
-
-function buildResultFilename(platform = 'unknown', now = new Date()) {
-  const pad = (n) => String(n).padStart(2, '0');
-  const datePart = `${pad(now.getDate())}_${pad(now.getMonth() + 1)}_${now.getFullYear()}`;
-  const safePlatform = String(platform || 'unknown').trim().toLowerCase() || 'unknown';
-  return `${safePlatform}_result_${datePart}.jsonl`;
-}
-
-function scoreReadableText(value) {
-  const text = String(value || '');
-  const mojibakeCount = (text.match(/[ÐÑÃÂâ]/g) || []).length;
-  const replacementCount = (text.match(/�/g) || []).length;
-  const cyrillicCount = (text.match(/[\u0400-\u04FF]/g) || []).length;
-  const latinCount = (text.match(/[A-Za-z]/g) || []).length;
-  return (cyrillicCount * 3) + latinCount - (mojibakeCount * 4) - (replacementCount * 6);
-}
-
-function repairMojibakeText(value) {
-  const text = String(value ?? '');
-  if (!/[ÐÑÃÂâ]/.test(text)) return text;
-  try {
-    const bytes = Uint8Array.from(Array.from(text).map((char) => char.charCodeAt(0) & 0xFF));
-    const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-    return scoreReadableText(decoded) >= scoreReadableText(text) ? decoded : text;
-  } catch (error) {
-    return text;
-  }
-}
-
-function signalActiveTab(action) {
-  return new Promise((resolve) => {
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-      const tab = tabs && tabs[0];
-      if (!tab || !tab.id) {
-        resolve(false);
-        return;
-      }
-      chrome.tabs.sendMessage(tab.id, { action }, () => {
-        resolve(!chrome.runtime.lastError);
-      });
-    });
-  });
-}
-
-function downloadJsonlFile(content, filename) {
-  return new Promise((resolve) => {
-    const blob = new Blob([content || ''], { type: 'application/x-ndjson;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    chrome.downloads.download({ url, filename, saveAs: false }, (downloadId) => {
-      const error = chrome.runtime.lastError?.message || null;
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-
-      if (!error) {
-        resolve({ success: true, downloadId });
-        return;
-      }
-
-      console.warn(error);
-      chrome.runtime.sendMessage({
-        action: 'downloadJsonl',
-        filename,
-        content: content || ''
-      }, (response) => {
-        resolve(response || { success: false, error });
-      });
-    });
-  });
-}
-
-function renderLogs(logsEl, logs) {
-  logsEl.textContent = '';
-  const fragment = document.createDocumentFragment();
-  for (const log of logs || []) {
-    const row = document.createElement('div');
-    row.className = 'log-entry';
-    const renderedLog = repairMojibakeText(log);
-    const parts = String(renderedLog).split('] ');
-    if (parts.length > 1) {
-      const time = document.createElement('span');
-      time.className = 'log-time';
-      time.textContent = `${parts[0]}]`;
-      row.appendChild(time);
-      row.appendChild(document.createTextNode(` ${parts.slice(1).join('] ')}`));
-    } else {
-      row.textContent = String(renderedLog);
-    }
-    fragment.appendChild(row);
-  }
-  logsEl.appendChild(fragment);
-  logsEl.scrollTop = logsEl.scrollHeight;
-}
-
-document.getElementById('langSelect').addEventListener('change', (e) => {
-  currentLang = e.target.value;
-  localStorage.setItem('scraper_lang', currentLang);
-  applyTranslations();
-  chrome.storage.local.get(['scrapeState'], (res) => {
-    updateUI(res.scrapeState);
-  });
-});
-
-document.addEventListener('DOMContentLoaded', () => {
-  applyTranslations();
-
-  const platformSelect = document.getElementById('platform');
-  const igAuthFields = document.getElementById('igAuthFields');
-  const fbAuthFields = document.getElementById('fbAuthFields');
-  const twAuthFields = document.getElementById('twAuthFields');
-
-  function updateAuthFieldsVisibility() {
-      const platform = platformSelect.value;
-      igAuthFields.style.display = platform === 'instagram' ? 'block' : 'none';
-      fbAuthFields.style.display = platform === 'facebook' ? 'block' : 'none';
-      twAuthFields.style.display = platform === 'twitter' ? 'block' : 'none';
-  }
-
-  if (platformSelect) {
-      platformSelect.addEventListener('change', updateAuthFieldsVisibility);
-      updateAuthFieldsVisibility();
-  }
-});
-
-function updateUI(state) {
-  const startBtn = document.getElementById('start');
-  const stopBtn = document.getElementById('stop');
-  const skipBtn = document.getElementById('skip');
-  const statusEl = document.getElementById('status');
-  const logsEl = document.getElementById('logs');
-  
-  if (state && state.active) {
-    startBtn.style.display = 'none';
-    stopBtn.style.display = 'block';
-    skipBtn.style.display = 'block';
-    statusEl.innerText = `${i18n[currentLang].statusInProgress}: ${state.currentKeyword} (${state.currentPosts?.length || 0}${state.targetCount !== -1 ? '/' + state.targetCount : ''})`;
-  } else {
-    startBtn.style.display = 'block';
-    startBtn.innerText = state && state.allResults?.length > 0 ? i18n[currentLang].startAgain : i18n[currentLang].startScraping;
-    stopBtn.style.display = 'none';
-    skipBtn.style.display = 'none';
-    statusEl.innerText = i18n[currentLang].statusStopped;
-  }
-  
-  if (state && state.logs) {
-    renderLogs(logsEl, state.logs);
-  }
-}
-
-  document.getElementById('limitCountToggle').addEventListener('change', (e) => {
-    document.getElementById('count').disabled = !e.target.checked;
-  });
-
-  document.getElementById('dateLimitToggle').addEventListener('change', (e) => {
-    document.getElementById('dateLimit').disabled = !e.target.checked;
-  });
-
-  document.getElementById('start').addEventListener('click', () => {
-    const keywordsRaw = document.getElementById('keywords').value;
-    const limitCountEnabled = document.getElementById('limitCountToggle').checked;
-    const parsedCount = parseInt(document.getElementById('count').value, 10);
-    const count = limitCountEnabled ? (Number.isFinite(parsedCount) && parsedCount > 0 ? parsedCount : 1) : -1;
-    const dateLimitEnabled = document.getElementById('dateLimitToggle').checked;
-    const dateLimitVal = document.getElementById('dateLimit').value; // YYYY-MM-DDTHH:mm
-    const parsedDateLimit = (dateLimitEnabled && dateLimitVal) ? new Date(dateLimitVal).getTime() : null;
-    const dateLimit = Number.isFinite(parsedDateLimit) ? parsedDateLimit : null;
-    const platform = document.getElementById('platform').value;
-    const infiniteLoop = document.getElementById('infiniteLoopToggle').checked;
-    const sendToServer = document.getElementById('sendToServerToggle').checked;
-    const saveToPC = document.getElementById('saveToPCToggle').checked;
-    const igUsername = document.getElementById('igUsername')?.value.trim() || '';
-    const igPassword = document.getElementById('igPassword')?.value.trim() || '';
-    const fbUsername = document.getElementById('fbUsername')?.value.trim() || '';
-    const fbPassword = document.getElementById('fbPassword')?.value.trim() || '';
-    const twUsername = document.getElementById('twUsername')?.value.trim() || '';
-    const twPassword = document.getElementById('twPassword')?.value.trim() || '';
-  
-  const keywords = keywordsRaw.split('\n').map(k => k.trim()).filter(k => k.length > 0);
-  
-  if (keywords.length === 0) {
-    alert(i18n[currentLang].alertKeywords);
-    return;
-  }
-  
-  const initialState = {
-    active: true,
-    platform: platform,
-    queue: keywords.slice(1),
-    originalKeywords: keywords,
-    currentKeyword: keywords[0],
-    targetCount: count,
-    dateLimit: dateLimit,
-    infiniteLoop: infiniteLoop,
-    sendToServer: sendToServer,
-    saveToPC: saveToPC,
-    igUsername: igUsername,
-    igPassword: igPassword,
-    fbUsername: fbUsername,
-    fbPassword: fbPassword,
-    twUsername: twUsername,
-    twPassword: twPassword,
-    currentPosts: [],
-    allResults: [],
-    seenPostUrls: [],
-    step: 'INITIAL_CHECK',
-    logs: [`[${new Date().toLocaleTimeString()}] Starting scraper (${platform}). First keyword: ${keywords[0]}`]
   };
-  
-  chrome.storage.local.set({ scrapeState: initialState }, () => {
-    // Navigate to explore to ensure a clean search state
-    signalActiveTab('resetScraperControl').catch(() => {});
-    chrome.tabs.query({active: true, lastFocusedWindow: true}, function(tabs) {
-      const currentTab = tabs[0];
-      
-      let targetUrl = 'https://x.com/explore';
-      let domainName = 'x.com';
-      if (platform === 'facebook') {
-        targetUrl = 'https://www.facebook.com/';
-        domainName = 'facebook.com';
-      } else if (platform === 'instagram') {
-        targetUrl = 'https://www.instagram.com/';
-        domainName = 'instagram.com';
-      } else if (platform === 'tiktok') {
-        targetUrl = 'https://www.tiktok.com/';
-        domainName = 'tiktok.com';
-      }
-      
-      if (currentTab && currentTab.url && currentTab.url.includes(domainName)) {
-        chrome.tabs.update(currentTab.id, { url: targetUrl });
-      } else if (currentTab) {
-        chrome.tabs.update(currentTab.id, { url: targetUrl });
-      } else {
-        chrome.tabs.create({ url: targetUrl });
-      }
+
+  const elements = Object.fromEntries([
+    'langSelect', 'platform', 'keywords', 'limitCountToggle', 'count', 'infiniteLoopToggle', 'dateLimitToggle', 'dateLimit',
+    'sendToServerToggle', 'saveToPCToggle', 'authUsername', 'authPassword', 'error', 'status', 'start', 'stop', 'skip', 'logs'
+  ].map((id) => [id, document.getElementById(id)]));
+  let language = localStorage.getItem('scraperLanguage') || 'ru';
+  let currentState = null;
+
+  function applyTranslations() {
+    elements.langSelect.value = language;
+    const dictionary = translations[language];
+    document.querySelectorAll('[data-i18n]').forEach((element) => {
+      const value = dictionary[element.dataset.i18n];
+      if (value) element.textContent = value;
     });
-  });
-});
-
-document.getElementById('stop').addEventListener('click', () => {
-  chrome.storage.local.get(['scrapeState'], (res) => {
-    if (res.scrapeState) {
-      const state = res.scrapeState;
-      state.active = false;
-      state.logs.push(`[${new Date().toLocaleTimeString()}] Scraping stopped by user.`);
-      
-      if (state.currentPosts && state.currentPosts.length > 0) {
-        state.allResults.push({
-          keyword: state.currentKeyword,
-          posts: state.currentPosts,
-          timestamp: new Date().toISOString()
-        });
-        state.currentPosts = [];
-      }
-      
-      chrome.storage.local.set({ scrapeState: state }, () => {
-        signalActiveTab('stopScraping').catch(() => {});
-        if (state.saveToPC !== false) {
-          const output = buildJsonlContent(state.allResults, state.platform || 'unknown');
-          const filename = buildResultFilename(state.platform || 'unknown');
-          downloadJsonlFile(output, filename).catch((error) => console.error(error));
-        }
-      });
-    }
-  });
-});
-
-document.getElementById('skip').addEventListener('click', () => {
-  chrome.storage.local.get(['scrapeState'], (res) => {
-    if (res.scrapeState) {
-      const state = res.scrapeState;
-      if (state.active) {
-        state.skipCurrentKeyword = true;
-        state.logs.push(`[${new Date().toLocaleTimeString()}] Skipping keyword: ${state.currentKeyword}`);
-        chrome.storage.local.set({ scrapeState: state }, () => {
-          signalActiveTab('skipCurrentKeyword').catch(() => {});
-        });
-      }
-    }
-  });
-});
-
-// Initial load
-chrome.storage.local.get(['scrapeState'], (res) => {
-  updateUI(res.scrapeState);
-});
-
-// Listen for updates from content script
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === 'local' && changes.scrapeState) {
-    updateUI(changes.scrapeState.newValue);
   }
-});
 
+  function showError(message = '') {
+    elements.error.textContent = message;
+    elements.error.style.display = message ? 'block' : 'none';
+  }
+
+  function renderLogs(logs = []) {
+    const fragment = document.createDocumentFragment();
+    for (const entry of logs) {
+      const row = document.createElement('div');
+      const timestamp = new Date(entry.timestamp || Date.now()).toLocaleTimeString();
+      const level = entry.level || 'info';
+      row.className = `log-${level}`;
+      row.textContent = `[${timestamp}] [${entry.platform || 'scraper'}] ${entry.message || String(entry)}${entry.details ? `: ${entry.details}` : ''}`;
+      fragment.appendChild(row);
+    }
+    elements.logs.replaceChildren(fragment);
+    elements.logs.scrollTop = elements.logs.scrollHeight;
+  }
+
+  function render(state) {
+    currentState = state || null;
+    const active = !!state?.active;
+    elements.start.hidden = active;
+    elements.stop.hidden = !active;
+    elements.skip.hidden = !active;
+    elements.start.disabled = false;
+    elements.stop.disabled = false;
+    elements.skip.disabled = false;
+    if (!state) elements.status.textContent = translations[language].ready;
+    else if (active) elements.status.textContent = `${translations[language].running}: ${state.currentKeyword} (${state.stats?.currentKeyword || 0}${state.targetCount === -1 ? '' : `/${state.targetCount}`})`;
+    else if (state.phase === 'completed' || state.phase === 'completed_with_errors') elements.status.textContent = `${translations[language].completed}: ${state.stats?.total || 0}`;
+    else elements.status.textContent = `${translations[language].stopped}: ${state.phase || ''}`;
+    renderLogs(state?.logs || []);
+  }
+
+  function validateForm() {
+    const keywords = elements.keywords.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    if (!keywords.length) throw new Error(language === 'ru' ? 'Введите хотя бы одно ключевое слово.' : 'Ən azı bir açar söz daxil edin.');
+    let targetCount = -1;
+    if (elements.limitCountToggle.checked) {
+      targetCount = Number(elements.count.value);
+      if (!Number.isInteger(targetCount) || targetCount < 1) throw new Error(language === 'ru' ? 'Количество постов должно быть целым числом больше нуля.' : 'Post sayı sıfırdan böyük tam ədəd olmalıdır.');
+    }
+    const parsedDate = elements.dateLimitToggle.checked ? app.utils.parseUserDate(elements.dateLimit.value) : { value: null, error: null };
+    if (parsedDate.error) throw new Error(parsedDate.error);
+    return { keywords, targetCount, dateLimit: parsedDate.value };
+  }
+
+  function platformTarget(platform) {
+    if (platform === 'facebook') return { domain: 'facebook.com', url: 'https://www.facebook.com/' };
+    if (platform === 'instagram') return { domain: 'instagram.com', url: 'https://www.instagram.com/' };
+    if (platform === 'tiktok') return { domain: 'tiktok.com', url: 'https://www.tiktok.com/' };
+    return { domain: 'x.com', url: 'https://x.com/explore' };
+  }
+
+  async function activeTab() {
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tabs[0]?.id) throw new Error(language === 'ru' ? 'Не найдена активная вкладка.' : 'Aktiv tab tapılmadı.');
+    return tabs[0];
+  }
+
+  elements.start.addEventListener('click', async () => {
+    showError();
+    elements.start.disabled = true;
+    try {
+      const form = validateForm();
+      const tab = await activeTab();
+      const platform = elements.platform.value;
+      const runId = crypto.randomUUID();
+      const state = {
+        version: app.VERSION,
+        runId,
+        ownerTabId: tab.id,
+        active: true,
+        phase: 'starting',
+        requestedAction: null,
+        platform,
+        keywords: form.keywords,
+        keywordIndex: 0,
+        currentKeyword: form.keywords[0],
+        targetCount: form.targetCount,
+        dateLimit: form.dateLimit,
+        infiniteLoop: elements.infiniteLoopToggle.checked,
+        sendToServer: elements.sendToServerToggle.checked,
+        saveToPC: elements.saveToPCToggle.checked,
+        stats: { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
+        logs: [{ timestamp: new Date().toISOString(), platform, level: 'info', message: `Run created. First keyword: ${form.keywords[0]}`, details: '' }],
+        createdAt: new Date().toISOString()
+      };
+      const secrets = {
+        [platform]: { username: elements.authUsername.value.trim(), password: elements.authPassword.value }
+      };
+      await app.storage.initialize(state, secrets);
+      render(state);
+
+      const target = platformTarget(platform);
+      let currentHost = '';
+      try { currentHost = new URL(tab.url).hostname; } catch (error) {}
+      if (!currentHost.endsWith(target.domain)) {
+        await chrome.tabs.update(tab.id, { url: target.url });
+      } else {
+        try {
+          const response = await chrome.tabs.sendMessage(tab.id, { action: 'scraper:start', runId, credentials: secrets });
+          if (!response?.success) throw new Error('Content script did not acknowledge Start');
+        } catch (error) {
+          await chrome.tabs.reload(tab.id);
+        }
+      }
+    } catch (error) {
+      showError(error.message);
+      elements.start.disabled = false;
+    }
+  });
+
+  elements.stop.addEventListener('click', async () => {
+    if (!currentState?.runId) return;
+    elements.stop.disabled = true;
+    elements.skip.disabled = true;
+    showError();
+    try {
+      await app.storage.requestControl(currentState.runId, 'stop');
+    } catch (error) {
+      showError(error.message);
+      elements.stop.disabled = false;
+    }
+  });
+
+  elements.skip.addEventListener('click', async () => {
+    if (!currentState?.runId) return;
+    elements.skip.disabled = true;
+    showError();
+    try {
+      await app.storage.requestControl(currentState.runId, 'skip');
+      setTimeout(() => { elements.skip.disabled = false; }, 800);
+    } catch (error) {
+      showError(error.message);
+      elements.skip.disabled = false;
+    }
+  });
+
+  elements.limitCountToggle.addEventListener('change', () => { elements.count.disabled = !elements.limitCountToggle.checked; });
+  elements.dateLimitToggle.addEventListener('change', () => { elements.dateLimit.disabled = !elements.dateLimitToggle.checked; });
+  elements.langSelect.addEventListener('change', () => {
+    language = elements.langSelect.value;
+    localStorage.setItem('scraperLanguage', language);
+    applyTranslations();
+    render(currentState);
+  });
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes[app.constants.STATE_KEY]) render(changes[app.constants.STATE_KEY].newValue);
+  });
+
+  applyTranslations();
+  app.storage.getState().then(render).catch((error) => showError(error.message));
+})(globalThis.ScraperApp);

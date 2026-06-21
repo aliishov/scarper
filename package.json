@@ -1,0 +1,9 @@
+{
+  "name": "multi-platform-scraper-extension",
+  "private": true,
+  "version": "2.0.0",
+  "scripts": {
+    "check": "node tests/static-check.js",
+    "test": "node --test tests/core.test.js"
+  }
+}

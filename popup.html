@@ -1,102 +1,85 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { width: 100%; padding: 16px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #fff; color: #0f1419; margin: 0; box-sizing: border-box; }
-    h3 { margin-top: 0; margin-bottom: 16px; font-size: 18px; }
-    label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 600; }
-    textarea.input-box { width: 100%; height: 80px; margin-bottom: 12px; padding: 8px; border: 1px solid #cfd9de; border-radius: 4px; font-family: inherit; resize: vertical; box-sizing: border-box; }
-    input.input-box { width: 100%; margin-bottom: 12px; padding: 8px; border: 1px solid #cfd9de; border-radius: 4px; font-family: inherit; box-sizing: border-box; }
-    select.input-box { width: 100%; margin-bottom: 12px; padding: 8px; border: 1px solid #cfd9de; border-radius: 4px; font-family: inherit; box-sizing: border-box; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23536471' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 8px center; background-size: 16px; cursor: pointer; background-color: #fff; }
-    .btn-group { display: flex; gap: 8px; margin-bottom: 12px; }
-    button { flex: 1; padding: 10px; color: white; border: none; cursor: pointer; border-radius: 9999px; font-weight: bold; font-size: 14px; transition: background 0.2s; }
-    #start { background: #1d9bf0; }
-    #start:hover { background: #1a8cd8; }
-    #start:disabled { background: #8ecdf8; cursor: not-allowed; }
-    #skip { background: #ff9800; display: none; margin-top: 4px; }
-    #skip:hover { background: #f57c00; }
-    #stop { background: #f4212e; display: none; }
-    #stop:hover { background: #e0202c; }
-    #status { font-size: 13px; color: #536471; margin-bottom: 8px; font-weight: 500; }
-    #logs { height: 300px; overflow-y: auto; background: #f7f9f9; border: 1px solid #cfd9de; border-radius: 4px; padding: 8px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; color: #0f1419; white-space: pre-wrap; word-wrap: break-word; }
-    .log-entry { margin-bottom: 4px; border-bottom: 1px solid #eff3f4; padding-bottom: 2px; }
-    .log-time { color: #536471; font-size: 10px; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; color: #17212b; background: #ffffff; font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    h1 { margin: 0; font-size: 18px; letter-spacing: 0; }
+    label { display: block; margin: 10px 0 5px; font-weight: 600; }
+    input[type="text"], input[type="password"], input[type="number"], textarea, select { width: 100%; border: 1px solid #b8c3cc; border-radius: 4px; padding: 8px; color: inherit; background: #fff; font: inherit; }
+    textarea { min-height: 88px; resize: vertical; }
+    .check { display: flex; gap: 7px; align-items: flex-start; font-weight: 500; }
+    .check input { margin-top: 3px; }
+    .auth { margin-top: 10px; padding: 10px 0; border-top: 1px solid #e3e8ec; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+    button { min-height: 38px; border: 0; border-radius: 4px; padding: 8px 12px; color: #fff; background: #1478c8; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: default; }
+    #stop { background: #c42b36; }
+    #skip { grid-column: 1 / -1; background: #a96500; }
+    #status { margin-top: 12px; color: #485866; font-weight: 600; }
+    #error { display: none; margin-top: 8px; padding: 8px; border-left: 3px solid #c42b36; color: #971c26; background: #fff3f4; }
+    #logs { height: 280px; margin-top: 6px; overflow: auto; border: 1px solid #d7dfe5; border-radius: 4px; padding: 8px; background: #f7f9fa; font: 11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .log-warn { color: #8a5600; }
+    .log-error { color: #b01825; }
+    .muted { color: #647582; font-size: 12px; font-weight: 400; }
   </style>
 </head>
 <body>
-  <div style="position: absolute; top: 10px; right: 10px;">
-    <select id="langSelect" style="font-size: 11px; padding: 2px; border: 1px solid #cfd9de; border-radius: 4px; background: white;">
+  <header>
+    <h1>Multi-platform scraper</h1>
+    <select id="langSelect" aria-label="Language" style="width:72px">
       <option value="ru">RU</option>
       <option value="az">AZ</option>
     </select>
-  </div>
-  <h3 data-translate="title">Multi platform scarper</h3>
-  <label data-translate="socialNetwork">Социальная сеть:</label>
-  <select id="platform" class="input-box" style="margin-bottom: 10px;">
+  </header>
+
+  <label for="platform" data-i18n="socialNetwork">Социальная сеть</label>
+  <select id="platform">
     <option value="twitter">X (Twitter)</option>
     <option value="facebook">Facebook</option>
     <option value="instagram">Instagram</option>
     <option value="tiktok">TikTok</option>
   </select>
-  <label data-translate="keywords">Ключевые слова (каждое с новой строки):</label>
-  <textarea id="keywords" class="input-box" placeholder="Например:&#10;mercedes&#10;bmw"></textarea>
-    <label>
-      <input type="checkbox" id="limitCountToggle" checked style="margin-right: 6px;" /> 
-      <span data-translate="maxPosts">Макс. постов на слово:</span>
-    </label>
-    <input type="number" id="count" class="input-box" value="10" min="1" />
-    
-    <label style="margin-bottom: 6px; display: block;">
-      <input type="checkbox" id="infiniteLoopToggle" style="margin-right: 6px;" />
-      <span data-translate="infiniteLoop">Бесконечный сбор (зациклить)</span>
-    </label>
-    
-    <label style="margin-bottom: 6px; display: block;">
-      <input type="checkbox" id="dateLimitToggle" style="margin-right: 6px;" />
-      <span data-translate="timeLimit">Ограничение по времени (собирать до)</span>
-    </label>
-    <input type="datetime-local" id="dateLimit" class="input-box" disabled />
-    
-    <label style="margin-bottom: 10px; display: block;">
-      <input type="checkbox" id="sendToServerToggle" checked style="margin-right: 6px;" /> 
-      <span data-translate="sendToServer">Отправлять посты на сервер</span>
-    </label>
 
-    <label style="margin-bottom: 10px; display: block;">
-      <input type="checkbox" id="saveToPCToggle" checked style="margin-right: 6px;" /> 
-      <span data-translate="saveToPC">Сохранять результаты в файл (на ПК)</span>
-    </label>
+  <label for="keywords" data-i18n="keywords">Ключевые слова, каждое с новой строки</label>
+  <textarea id="keywords" placeholder="Messi&#10;FIFA"></textarea>
 
-    <div id="igAuthFields" style="display: none; background: #f0f2f5; padding: 10px; border-radius: 6px; margin-bottom: 10px;">
-        <label style="font-size: 11px; margin-bottom: 5px; display:block;">Авторизация Instagram (дефолтные):</label>
-        <input type="text" id="igUsername" class="input-box" placeholder="Логин/Email" value="raulalishov849@gmail.com" style="margin-bottom: 5px; padding: 6px; box-sizing: border-box;" />
-        <input type="password" id="igPassword" class="input-box" placeholder="Пароль" value="2v7$s4N+9RLsQhG" style="padding: 6px; box-sizing: border-box;" />
-    </div>
+  <label class="check"><input type="checkbox" id="limitCountToggle" checked><span data-i18n="maxPosts">Ограничить количество постов на слово</span></label>
+  <input type="number" id="count" value="10" min="1" step="1">
 
-    <div id="fbAuthFields" style="display: none; background: #f0f2f5; padding: 10px; border-radius: 6px; margin-bottom: 10px;">
-        <label style="font-size: 11px; margin-bottom: 5px; display:block;">Авторизация Facebook (опционально):</label>
-        <input type="text" id="fbUsername" class="input-box" placeholder="Email/Телефон" value="raulalishov849@gmail.com" style="margin-bottom: 5px; padding: 6px; box-sizing: border-box;" />
-        <input type="password" id="fbPassword" class="input-box" placeholder="Пароль" value="Ds7B*R@qjgMdudw" style="padding: 6px; box-sizing: border-box;" />
-    </div>
+  <label class="check"><input type="checkbox" id="infiniteLoopToggle"><span data-i18n="infiniteLoop">Бесконечный сбор</span></label>
+  <label class="check"><input type="checkbox" id="dateLimitToggle"><span data-i18n="dateLimit">Не собирать посты старше даты</span></label>
+  <input type="text" id="dateLimit" placeholder="DD_MM_YYYY" inputmode="numeric" disabled>
 
-    <div id="twAuthFields" style="display: none; background: #f0f2f5; padding: 10px; border-radius: 6px; margin-bottom: 10px;">
-        <label style="font-size: 11px; margin-bottom: 5px; display:block;">Авторизация Twitter (X) (опционально):</label>
-        <input type="text" id="twUsername" class="input-box" placeholder="Username/Email" value="AlexeyMoro51303" style="margin-bottom: 5px; padding: 6px; box-sizing: border-box;" />
-        <input type="password" id="twPassword" class="input-box" placeholder="Пароль" value="!pLYpMKQb3iz+ys" style="padding: 6px; box-sizing: border-box;" />
-    </div>
-    
-    <div id="status" data-translate="statusReady">Готов к запуску</div>
-  
-  <div class="btn-group">
-    <button id="start" data-translate="startScraping">Начать сбор</button>
-    <button id="stop" data-translate="stop">Остановить</button>
+  <label class="check"><input type="checkbox" id="sendToServerToggle" checked><span data-i18n="sendToServer">Отправлять посты на сервер</span></label>
+  <label class="check"><input type="checkbox" id="saveToPCToggle" checked><span data-i18n="saveToPC">Сохранять результаты в JSONL на ПК</span></label>
+
+  <section id="authFields" class="auth">
+    <div class="muted" data-i18n="auth">Данные входа используются только в текущей сессии браузера</div>
+    <label for="authUsername" data-i18n="username">Логин или email</label>
+    <input type="text" id="authUsername" autocomplete="off">
+    <label for="authPassword" data-i18n="password">Пароль</label>
+    <input type="password" id="authPassword" autocomplete="new-password">
+  </section>
+
+  <div id="error" role="alert"></div>
+  <div id="status" data-i18n="ready">Готов к запуску</div>
+
+  <div class="actions">
+    <button id="start" data-i18n="start">Начать сбор</button>
+    <button id="stop" data-i18n="stop" hidden>Остановить</button>
+    <button id="skip" data-i18n="skip" hidden>Следующее слово</button>
   </div>
-  <button id="skip" style="width: 100%; margin-bottom: 12px;" data-translate="skipKeyword">Пропустить текущее слово</button>
-  
-  <label data-translate="logs">Логи:</label>
+
+  <label for="logs" data-i18n="logs">Логи</label>
   <div id="logs"></div>
-  
+
+  <script src="core/namespace.js"></script>
+  <script src="core/utils.js"></script>
+  <script src="core/storage.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -1,10 +1,27 @@
 {
   "manifest_version": 3,
-  "name": "Multi platform scraper",
-  "version": "1.4",
-  "description": "Automates searching and scraping posts across X, Facebook, Instagram, and TikTok",
-  "permissions": ["storage", "activeTab", "scripting", "downloads", "sidePanel"],
-  "host_permissions": ["*://x.com/*", "*://twitter.com/*", "*://www.facebook.com/*", "*://facebook.com/*", "*://www.instagram.com/*", "*://instagram.com/*", "*://www.tiktok.com/*", "*://tiktok.com/*", "http://localhost/*"],
+  "name": "Multi-platform scraper",
+  "version": "2.0.0",
+  "description": "Collects posts from X, Facebook, Instagram, and TikTok",
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "sidePanel",
+    "storage",
+    "tabs",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "*://x.com/*",
+    "*://twitter.com/*",
+    "*://www.facebook.com/*",
+    "*://facebook.com/*",
+    "*://www.instagram.com/*",
+    "*://instagram.com/*",
+    "*://www.tiktok.com/*",
+    "*://tiktok.com/*",
+    "http://localhost/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -16,10 +33,33 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://x.com/*", "*://twitter.com/*", "*://www.facebook.com/*", "*://facebook.com/*", "*://www.instagram.com/*", "*://instagram.com/*", "*://www.tiktok.com/*", "*://tiktok.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "*://x.com/*",
+        "*://twitter.com/*",
+        "*://www.facebook.com/*",
+        "*://facebook.com/*",
+        "*://www.instagram.com/*",
+        "*://instagram.com/*",
+        "*://www.tiktok.com/*",
+        "*://tiktok.com/*"
+      ],
+      "js": [
+        "core/namespace.js",
+        "core/utils.js",
+        "core/storage.js",
+        "core/logger.js",
+        "core/navigation.js",
+        "core/server.js",
+        "core/downloads.js",
+        "scrapers/base.js",
+        "scrapers/twitter.js",
+        "scrapers/facebook.js",
+        "scrapers/instagram.js",
+        "scrapers/tiktok.js",
+        "core/state-machine.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]
 }
-
