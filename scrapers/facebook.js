@@ -617,10 +617,64 @@
       return null;
     }
 
+    facebookUnsafeInteractionReason(element) {
+      if (!element) return 'missing-target';
+      const mediaRoot = element.closest?.('[data-ad-rendering-role="image"], [data-ad-rendering-role="video"], a[href*="/reel/"], a[href*="/reels/"], a[href*="/videos/"], video, img');
+      if (mediaRoot) return 'media-or-reels-area';
+      const labelled = element.closest?.('[aria-label="Об этом контенте"], [aria-label="About this content"]');
+      if (labelled) return 'content-info-control';
+      const svg = element.closest?.('svg');
+      const svgTitle = app.utils.normalizeText(svg?.getAttribute('title') || svg?.querySelector('title')?.textContent || '');
+      if (/(shared|доступно всем)/i.test(svgTitle)) return 'visibility-icon';
+      const control = element.closest?.('[role="button"], button, [tabindex]');
+      const controlLabel = app.utils.normalizeText(`${control?.getAttribute('aria-label') || ''} ${this.text(control)}`);
+      if (/^(об этом контенте|about this content)$/.test(controlLabel)) return 'content-info-control';
+      if (/^(ещё|еще|more)$/.test(controlLabel) && !control?.closest('[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"]')) {
+        return 'ambiguous-more-outside-message';
+      }
+      return '';
+    }
+
+    facebookContentInfoPopup() {
+      const candidates = this.allVisible('[role="dialog"], [role="menu"], [aria-modal="true"], [data-pagelet*="Dialog"]');
+      return candidates.find((element) => {
+        const label = app.utils.normalizeText(`${element.getAttribute('aria-label') || ''} ${this.text(element).slice(0, 300)}`);
+        return /(^|\s)(об этом контенте|about this content)(\s|$)/.test(label);
+      }) || null;
+    }
+
+    async settleFacebookInteraction(element, postElement, ctx) {
+      const body = document.body;
+      if (element) {
+        const options = { bubbles: true, cancelable: true, view: window, relatedTarget: body, clientX: 2, clientY: 2 };
+        if (typeof PointerEvent === 'function') element.dispatchEvent(new PointerEvent('pointerout', { ...options, pointerType: 'mouse' }));
+        element.dispatchEvent(new MouseEvent('mouseout', options));
+        element.dispatchEvent(new MouseEvent('mouseleave', options));
+      }
+      const safeTarget = body || postElement || document.documentElement;
+      const safeOptions = { bubbles: true, cancelable: true, view: window, clientX: 2, clientY: 2 };
+      if (typeof PointerEvent === 'function') safeTarget.dispatchEvent(new PointerEvent('pointermove', { ...safeOptions, pointerType: 'mouse' }));
+      safeTarget.dispatchEvent(new MouseEvent('mousemove', safeOptions));
+      await ctx.logger.info('Facebook pointer moved away from media/interactive target');
+
+      const popup = this.facebookContentInfoPopup();
+      if (!popup) return;
+      await ctx.logger.warn('Facebook accidental content-info popup detected; closing with Escape');
+      const keyboardTarget = document.activeElement || body;
+      dispatchFacebookKey(keyboardTarget, 'keydown', 'Escape', 'Escape', 27);
+      dispatchFacebookKey(keyboardTarget, 'keyup', 'Escape', 'Escape', 27);
+      const closed = await app.utils.waitFor(() => !this.facebookContentInfoPopup(), { timeoutMs: 800, intervalMs: 100, token: ctx.token });
+      if (closed) return;
+      safeTarget.dispatchEvent(new MouseEvent('mousedown', safeOptions));
+      safeTarget.dispatchEvent(new MouseEvent('mouseup', safeOptions));
+      safeTarget.dispatchEvent(new MouseEvent('click', safeOptions));
+      await ctx.logger.warn('Facebook content-info popup required outside-click fallback');
+    }
+
     facebookExpandCandidates(postElement, tried = new Set()) {
       const storyMessage = this.visible('[data-ad-rendering-role="story_message"]', postElement);
       const message = storyMessage || this.messageNode(postElement);
-      const roots = [storyMessage, message, message?.parentElement, postElement].filter(Boolean);
+      const roots = storyMessage ? [storyMessage] : message ? [message, message.parentElement].filter(Boolean) : [];
       const found = [];
       roots.forEach((root, priority) => {
         const selector = root === storyMessage
@@ -635,6 +689,7 @@
           const clickable = element.closest('div[role="button"], span[role="button"], a, button, [tabindex]') ||
             (getComputedStyle(element).cursor === 'pointer' ? element : null);
           if (!clickable || !postElement.contains(clickable) || tried.has(clickable) || !app.utils.isVisible(clickable)) continue;
+          if (this.facebookUnsafeInteractionReason(clickable)) continue;
           found.push({ element, clickable, label, priority, insideStoryMessage: !!storyMessage?.contains(element) });
         }
       });
@@ -648,6 +703,7 @@
     async expandFacebookFullText(postElement, ctx) {
       const tried = new Set();
       let expanded = false;
+      await this.settleFacebookInteraction(null, postElement, ctx);
       for (let attempt = 1; attempt <= 5; attempt++) {
         const storyMessage = this.visible('[data-ad-rendering-role="story_message"]', postElement);
         await ctx.logger.info('Facebook Story message found', String(!!storyMessage));
@@ -664,6 +720,7 @@
         await ctx.logger.info('Facebook Click expand via parent', candidate.clickable.tagName || candidate.clickable.getAttribute('role') || 'unknown');
         const clicked = await ctx.navigation.click(candidate.clickable, `Facebook expand text: ${candidate.label}`, { scroll: false });
         if (!clicked) {
+          await this.settleFacebookInteraction(candidate.clickable, postElement, ctx);
           await ctx.logger.warn('Facebook Expand fail', 'click was not performed');
           continue;
         }
@@ -671,6 +728,7 @@
           return this.extractPostText(postElement, { broad: true }).text.length > before.length;
         }, { timeoutMs: 1500, intervalMs: 100, token: ctx.token });
         const after = this.extractPostText(postElement, { broad: true }).text;
+        await this.settleFacebookInteraction(candidate.clickable, postElement, ctx);
         await ctx.logger.info('Facebook Text length after', String(after.length));
         await ctx.logger.info('Facebook Text length before/after', `${before.length} -> ${after.length}`);
         if (!changed || after.length <= before.length) {
@@ -939,6 +997,7 @@
 
     rejectedDateElement(element, article) {
       if (!element || element.matches('img, video') || element.querySelector('img, video')) return true;
+      if (this.facebookUnsafeInteractionReason(element)) return true;
       const message = this.messageNode(article);
       if (message?.contains(element)) return true;
       if (element.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"], [role="tooltip"]')) return true;
@@ -1013,51 +1072,62 @@
     }
 
     async hoverHeaderDateCandidate(element, selector, ctx) {
-      const tooltipSelector = '[role="tooltip"], [data-testid="tooltip"]';
-      const before = new Map(Array.from(document.querySelectorAll(tooltipSelector)).map((node) => [node, this.text(node)]));
-      await ctx.logger.info('Facebook Header date candidate found', `selector=${selector}, text=${this.text(element).slice(0, 80)}`);
-      await ctx.logger.info('Facebook Hovering header date candidate');
-      const rect = element.getBoundingClientRect();
-      const eventOptions = {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX: Math.max(0, rect.left + Math.min(rect.width / 2, 16)),
-        clientY: Math.max(0, rect.top + Math.min(rect.height / 2, 10))
-      };
-      if (typeof PointerEvent === 'function') {
-        element.dispatchEvent(new PointerEvent('pointerover', { ...eventOptions, pointerType: 'mouse' }));
-        element.dispatchEvent(new PointerEvent('pointerenter', { ...eventOptions, pointerType: 'mouse' }));
+      const postElement = element?.closest?.('article, [role="article"], [data-pagelet*="FeedUnit"]') || element?.parentElement;
+      const unsafeReason = this.facebookUnsafeInteractionReason(element);
+      if (unsafeReason) {
+        await ctx.logger.warn('Facebook date hover target rejected as unsafe', `reason=${unsafeReason}`);
+        await this.settleFacebookInteraction(element, postElement, ctx);
+        return null;
       }
-      for (const type of ['mouseenter', 'mouseover', 'mousemove']) {
-        element.dispatchEvent(new MouseEvent(type, eventOptions));
-      }
-      for (let attempt = 0; attempt < 6; attempt++) {
-        await app.utils.sleep(250, ctx.token);
-        const referencedIds = `${element.getAttribute('aria-describedby') || ''} ${element.getAttribute('aria-labelledby') || ''}`.trim().split(/\s+/).filter(Boolean);
-        const referenced = referencedIds.map((id) => document.getElementById(id)).filter(Boolean);
-        const tooltipNodes = [...referenced, ...Array.from(document.querySelectorAll(tooltipSelector))];
-        for (const tooltip of Array.from(new Set(tooltipNodes))) {
-          const text = this.text(tooltip) || tooltip.getAttribute('aria-label') || '';
-          if (!text) continue;
-          const isFresh = !before.has(tooltip) || before.get(tooltip) !== text || referenced.includes(tooltip);
-          if (!isFresh) continue;
-          await ctx.logger.info('Facebook Tooltip text', text.slice(0, 180));
-          if (isMediaTooltipText(text)) {
-            await ctx.logger.warn('Facebook Tooltip rejected: media alt text', text.slice(0, 180));
-            continue;
-          }
-          if (!looksLikeFacebookDate(text)) {
-            await ctx.logger.warn('Facebook Tooltip rejected: not a publication date', text.slice(0, 180));
-            continue;
-          }
-          const parsed = parseFacebookDate(text);
-          await ctx.logger.info('Facebook Tooltip accepted as publication date', text);
-          await ctx.logger.info('Facebook Parsed post date', app.utils.formatTimestamp(parsed));
-          return { parsed, text, source: `hover:${selector}` };
+      try {
+        const tooltipSelector = '[role="tooltip"], [data-testid="tooltip"]';
+        const before = new Map(Array.from(document.querySelectorAll(tooltipSelector)).map((node) => [node, this.text(node)]));
+        await ctx.logger.info('Facebook Header date candidate found', `selector=${selector}, text=${this.text(element).slice(0, 80)}`);
+        await ctx.logger.info('Facebook Hovering header date candidate');
+        const rect = element.getBoundingClientRect();
+        const eventOptions = {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: Math.max(0, rect.left + Math.min(rect.width / 2, 16)),
+          clientY: Math.max(0, rect.top + Math.min(rect.height / 2, 10))
+        };
+        if (typeof PointerEvent === 'function') {
+          element.dispatchEvent(new PointerEvent('pointerover', { ...eventOptions, pointerType: 'mouse' }));
+          element.dispatchEvent(new PointerEvent('pointerenter', { ...eventOptions, pointerType: 'mouse' }));
         }
+        for (const type of ['mouseenter', 'mouseover', 'mousemove']) {
+          element.dispatchEvent(new MouseEvent(type, eventOptions));
+        }
+        for (let attempt = 0; attempt < 6; attempt++) {
+          await app.utils.sleep(250, ctx.token);
+          const referencedIds = `${element.getAttribute('aria-describedby') || ''} ${element.getAttribute('aria-labelledby') || ''}`.trim().split(/\s+/).filter(Boolean);
+          const referenced = referencedIds.map((id) => document.getElementById(id)).filter(Boolean);
+          const tooltipNodes = [...referenced, ...Array.from(document.querySelectorAll(tooltipSelector))];
+          for (const tooltip of Array.from(new Set(tooltipNodes))) {
+            const text = this.text(tooltip) || tooltip.getAttribute('aria-label') || '';
+            if (!text) continue;
+            const isFresh = !before.has(tooltip) || before.get(tooltip) !== text || referenced.includes(tooltip);
+            if (!isFresh) continue;
+            await ctx.logger.info('Facebook Tooltip text', text.slice(0, 180));
+            if (isMediaTooltipText(text)) {
+              await ctx.logger.warn('Facebook Tooltip rejected: media alt text', text.slice(0, 180));
+              continue;
+            }
+            if (!looksLikeFacebookDate(text)) {
+              await ctx.logger.warn('Facebook Tooltip rejected: not a publication date', text.slice(0, 180));
+              continue;
+            }
+            const parsed = parseFacebookDate(text);
+            await ctx.logger.info('Facebook Tooltip accepted as publication date', text);
+            await ctx.logger.info('Facebook Parsed post date', app.utils.formatTimestamp(parsed));
+            return { parsed, text, source: `hover:${selector}` };
+          }
+        }
+        return null;
+      } finally {
+        await this.settleFacebookInteraction(element, postElement, ctx);
       }
-      return null;
     }
 
     async findAndHoverFacebookDateElement(article, ctx, postUrl = '') {
