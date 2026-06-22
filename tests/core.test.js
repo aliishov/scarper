@@ -88,6 +88,30 @@ test('Facebook accepts the author-time tooltip and rejects media accessibility t
   }
 });
 
+test('Facebook container scoring rejects media wrappers and whole feeds', () => {
+  const mediaWrapper = app.parsers.facebookContainerScore({
+    hasAuthor: false, hasText: false, hasExpand: false, hasDateMeta: false,
+    hasPermalink: true, hasMedia: true, hasEngagement: false, tooLarge: false, isFeed: false
+  });
+  const fullPost = app.parsers.facebookContainerScore({
+    hasAuthor: true, hasText: true, hasExpand: true, hasDateMeta: true,
+    hasPermalink: true, hasMedia: true, hasEngagement: true, tooLarge: false, isFeed: false
+  });
+  const feed = app.parsers.facebookContainerScore({
+    hasAuthor: true, hasText: true, hasExpand: true, hasDateMeta: true,
+    hasPermalink: true, hasMedia: true, hasEngagement: true, tooLarge: true, isFeed: true
+  });
+  assert.ok(fullPost > mediaWrapper);
+  assert.ok(feed < 0);
+});
+
+test('Facebook expand labels cover supported locales without matching UI text', () => {
+  for (const label of ['See more', 'More', 'Read more', 'Show more', 'Ещё', 'Еще', 'Показать больше', 'Daha çox', 'Devamını gör']) {
+    assert.equal(app.parsers.facebookExpandLabel(label), true, label);
+  }
+  assert.equal(app.parsers.facebookExpandLabel('Share'), false);
+});
+
 test('Facebook parses localized relative dates', () => {
   const now = new Date(2026, 5, 20, 12, 0, 0);
   assert.equal(app.parsers.facebookDate('2 min ago', now).getTime(), now.getTime() - 120000);
