@@ -150,12 +150,16 @@
           continue;
         }
 
-        const typed = await this.type(input, options.keyword, `${options.platform} search input`);
+        const typed = options.typeInput
+          ? await options.typeInput(input, options.keyword)
+          : await this.type(input, options.keyword, `${options.platform} search input`);
         if (!typed) {
           await this.logger.warn(`Typing/focus validation failed on search attempt ${attempt}`);
           continue;
         }
-        let success = await this.pressEnter(input, options.verify, `${options.platform} search input`);
+        let success = options.pressEnter
+          ? await options.pressEnter(input, options.verify)
+          : await this.pressEnter(input, options.verify, `${options.platform} search input`);
         if (!success && options.clickSuggestion) {
           await this.logger.warn('Enter was not confirmed; trying an exact UI suggestion');
           success = await options.clickSuggestion(input);

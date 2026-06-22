@@ -2,18 +2,18 @@
   'use strict';
 
   const MONTHS = new Map([
-    ['january', 0], ['jan', 0], ['января', 0], ['янв', 0], ['yanvar', 0],
-    ['february', 1], ['feb', 1], ['февраля', 1], ['фев', 1], ['fevral', 1],
-    ['march', 2], ['mar', 2], ['марта', 2], ['мар', 2], ['mart', 2],
-    ['april', 3], ['apr', 3], ['апреля', 3], ['апр', 3], ['aprel', 3],
+    ['january', 0], ['jan', 0], ['января', 0], ['январь', 0], ['янв', 0], ['yanvar', 0],
+    ['february', 1], ['feb', 1], ['февраля', 1], ['февраль', 1], ['фев', 1], ['fevral', 1],
+    ['march', 2], ['mar', 2], ['марта', 2], ['март', 2], ['мар', 2], ['mart', 2],
+    ['april', 3], ['apr', 3], ['апреля', 3], ['апрель', 3], ['апр', 3], ['aprel', 3],
     ['may', 4], ['мая', 4], ['mayıs', 4], ['mayis', 4],
-    ['june', 5], ['jun', 5], ['июня', 5], ['июн', 5], ['iyun', 5],
-    ['july', 6], ['jul', 6], ['июля', 6], ['июл', 6], ['iyul', 6],
-    ['august', 7], ['aug', 7], ['августа', 7], ['авг', 7], ['avqust', 7],
-    ['september', 8], ['sep', 8], ['sept', 8], ['сентября', 8], ['сен', 8], ['sentyabr', 8],
-    ['october', 9], ['oct', 9], ['октября', 9], ['окт', 9], ['oktyabr', 9],
-    ['november', 10], ['nov', 10], ['ноября', 10], ['ноя', 10], ['noyabr', 10],
-    ['december', 11], ['dec', 11], ['декабря', 11], ['дек', 11], ['dekabr', 11]
+    ['june', 5], ['jun', 5], ['июня', 5], ['июнь', 5], ['июн', 5], ['iyun', 5],
+    ['july', 6], ['jul', 6], ['июля', 6], ['июль', 6], ['июл', 6], ['iyul', 6],
+    ['august', 7], ['aug', 7], ['августа', 7], ['август', 7], ['авг', 7], ['avqust', 7],
+    ['september', 8], ['sep', 8], ['sept', 8], ['сентября', 8], ['сентябрь', 8], ['сен', 8], ['sentyabr', 8],
+    ['october', 9], ['oct', 9], ['октября', 9], ['октябрь', 9], ['окт', 9], ['oktyabr', 9],
+    ['november', 10], ['nov', 10], ['ноября', 10], ['ноябрь', 10], ['ноя', 10], ['noyabr', 10],
+    ['december', 11], ['dec', 11], ['декабря', 11], ['декабрь', 11], ['дек', 11], ['dekabr', 11]
   ]);
 
   function validDate(date) {
@@ -52,7 +52,8 @@
       || /^\d{4}-\d{2}-\d{2}[T\s]/.test(text)
       || /\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/.test(text)
       || /\b(19|20)\d{2}\b.*\b\d{1,2}:\d{2}\b/.test(text)
-      || /\b(january|february|march|april|may|june|july|august|september|october|november|december|января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)\b.*\b\d{1,2}\b/i.test(text)
+      || /\b(january|february|march|april|may|june|july|august|september|october|november|december|января|январь|февраля|февраль|марта|март|апреля|апрель|мая|июня|июнь|июля|июль|августа|август|сентября|сентябрь|октября|октябрь|ноября|ноябрь|декабря|декабрь)\b.*\b\d{1,2}\b/i.test(text)
+      || /\b\d{1,2}\s+(january|february|march|april|may|june|july|august|september|october|november|december|января|январь|февраля|февраль|марта|март|апреля|апрель|мая|июня|июнь|июля|июль|августа|август|сентября|сентябрь|октября|октябрь|ноября|ноябрь|декабря|декабрь)\b/i.test(text)
       || /(?:^|\s)\d+\s*(s|sec|m|min|h|hr|d|day|w|week|mo|month|y|year|сек|мин|ч|час|д|дн|нед|мес|г|год)(?:\.|\s|$)/iu.test(text)
       || /^(just now|today|yesterday|сейчас|только что|сегодня|вчера)$/i.test(text);
   }
@@ -65,6 +66,20 @@
     if (/am/i.test(match[3]) && hour === 12) hour = 0;
     date.setHours(hour, Number(match[2]), 0, 0);
     return date;
+  }
+
+  function dispatchFacebookKey(element, type, key, code, keyCode, extra = {}) {
+    element.dispatchEvent(new KeyboardEvent(type, {
+      key,
+      code,
+      keyCode,
+      which: keyCode,
+      charCode: type === 'keypress' ? keyCode : 0,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      ...extra
+    }));
   }
 
   function parseFacebookDate(value, now = new Date()) {
@@ -184,7 +199,141 @@
     }
 
     searchInput() {
-      return this.visible('input[type="search"], input[name="q"], [role="search"] input, input[placeholder*="Search" i], input[aria-label*="Search" i], input[placeholder*="Поиск" i], input[aria-label*="Поиск" i]');
+      return this.visible('input[type="search"], input[name="q"], [role="search"] input, input[placeholder*="Search" i], input[aria-label*="Search" i], input[placeholder*="Поиск" i], input[aria-label*="Поиск" i], [role="search"] [contenteditable="true"], [role="combobox"][contenteditable="true"][aria-label*="Search" i], [role="combobox"][contenteditable="true"][aria-label*="Поиск" i], [role="textbox"][contenteditable="true"][aria-label*="Search" i], [role="textbox"][contenteditable="true"][aria-label*="Поиск" i]');
+    }
+
+    facebookSearchValue(input) {
+      return input?.isContentEditable || input?.getAttribute?.('contenteditable') === 'true'
+        ? String(input.innerText || input.textContent || '').replace(/\s+/g, ' ').trim()
+        : String(input?.value || '');
+    }
+
+    placeFacebookCaretAtEnd(input) {
+      if (input?.isContentEditable || input?.getAttribute?.('contenteditable') === 'true') {
+        const selection = document.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(input);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return;
+      }
+      if (typeof input?.setSelectionRange === 'function') {
+        const end = String(input.value || '').length;
+        input.setSelectionRange(end, end);
+      }
+    }
+
+    facebookSearchFocusState(input) {
+      const active = document.activeElement === input;
+      const contenteditable = !!(input?.isContentEditable || input?.getAttribute?.('contenteditable') === 'true');
+      if (contenteditable) {
+        const selection = document.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+        const inside = !!range && input.contains(range.startContainer) && input.contains(range.endContainer);
+        return { active, contenteditable, caretConfirmed: active && inside && range.collapsed };
+      }
+      const length = String(input?.value || '').length;
+      const caretConfirmed = active && typeof input?.selectionStart === 'number' && input.selectionStart === length && input.selectionEnd === length;
+      return { active, contenteditable, caretConfirmed };
+    }
+
+    async focusFacebookSearchInput(input, ctx) {
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        ctx.token.throwIfCancelled();
+        await ctx.logger.info(`Facebook Search input focus attempt ${attempt}/5`);
+        input.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        await ctx.navigation.click(input, 'Facebook search input focus', { scroll: false });
+        input.focus({ preventScroll: true });
+        input.dispatchEvent(new FocusEvent('focus', { bubbles: true, composed: true }));
+        await ctx.navigation.click(input, 'Facebook search input center click', { scroll: false });
+        input.focus({ preventScroll: true });
+        this.placeFacebookCaretAtEnd(input);
+        await app.utils.sleep(200, ctx.token);
+        const state = this.facebookSearchFocusState(input);
+        if (state.active) await ctx.logger.info('Facebook document.activeElement confirmed');
+        if (state.caretConfirmed) await ctx.logger.info('Facebook Caret confirmed in search input');
+        if (state.active && state.caretConfirmed) {
+          await ctx.logger.info('Facebook Search input is ready for typing');
+          return true;
+        }
+        await ctx.logger.warn('Facebook search focus/caret not confirmed', JSON.stringify(state));
+      }
+      return false;
+    }
+
+    clearFacebookSearchInput(input) {
+      const contenteditable = input.isContentEditable || input.getAttribute('contenteditable') === 'true';
+      dispatchFacebookKey(input, 'keydown', 'a', 'KeyA', 65, { ctrlKey: true });
+      dispatchFacebookKey(input, 'keyup', 'a', 'KeyA', 65, { ctrlKey: true });
+      dispatchFacebookKey(input, 'keydown', 'Backspace', 'Backspace', 8);
+      input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward', data: null }));
+      if (contenteditable) {
+        input.textContent = '';
+      } else {
+        const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        if (!setter) return false;
+        setter.call(input, '');
+      }
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+      dispatchFacebookKey(input, 'keyup', 'Backspace', 'Backspace', 8);
+      this.placeFacebookCaretAtEnd(input);
+      return true;
+    }
+
+    async typeFacebookSearchKeyword(input, keyword, ctx) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        if (!(await this.focusFacebookSearchInput(input, ctx))) return false;
+        if (!this.clearFacebookSearchInput(input)) return false;
+        await app.utils.sleep(app.utils.randomInt(300, 600), ctx.token);
+        const contenteditable = input.isContentEditable || input.getAttribute('contenteditable') === 'true';
+        const prototype = !contenteditable ? (input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype) : null;
+        const setter = prototype ? Object.getOwnPropertyDescriptor(prototype, 'value')?.set : null;
+        if (!contenteditable && !setter) return false;
+        for (const character of String(keyword)) {
+          ctx.token.throwIfCancelled();
+          const state = this.facebookSearchFocusState(input);
+          if (!state.active || !state.caretConfirmed) {
+            if (!(await this.focusFacebookSearchInput(input, ctx))) return false;
+          }
+          const keyCode = character.codePointAt(0) || 0;
+          dispatchFacebookKey(input, 'keydown', character, `Key${character.toUpperCase()}`, keyCode);
+          input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: character }));
+          if (contenteditable) {
+            const inserted = typeof document.execCommand === 'function' && document.execCommand('insertText', false, character);
+            if (!inserted) input.append(document.createTextNode(character));
+          } else {
+            setter.call(input, `${input.value}${character}`);
+          }
+          input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: character }));
+          dispatchFacebookKey(input, 'keyup', character, `Key${character.toUpperCase()}`, keyCode);
+          this.placeFacebookCaretAtEnd(input);
+          await app.utils.sleep(app.utils.randomInt(100, 300), ctx.token);
+        }
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        const actual = this.facebookSearchValue(input);
+        if (actual === String(keyword)) {
+          await ctx.logger.info('Facebook keyword verified in search input', actual);
+          return true;
+        }
+        await ctx.logger.warn('Facebook keyword did not appear in search input', `attempt=${attempt}/3, actual=${actual}`);
+      }
+      return false;
+    }
+
+    async pressFacebookSearchEnter(input, verify, ctx) {
+      let state = this.facebookSearchFocusState(input);
+      if (!state.active || !state.caretConfirmed) {
+        if (!(await this.focusFacebookSearchInput(input, ctx))) return false;
+        state = this.facebookSearchFocusState(input);
+      }
+      if (!state.active || !state.caretConfirmed) return false;
+      await ctx.logger.info('Facebook Enter pressed after confirmed focus/caret');
+      dispatchFacebookKey(input, 'keydown', 'Enter', 'Enter', 13);
+      dispatchFacebookKey(input, 'keypress', 'Enter', 'Enter', 13);
+      dispatchFacebookKey(input, 'keyup', 'Enter', 'Enter', 13);
+      return !!(await app.utils.waitFor(verify, { timeoutMs: 5000, intervalMs: 250, token: ctx.token }));
     }
 
     async clickExactSuggestion(keyword, ctx) {
@@ -207,6 +356,8 @@
             if (control) await ctx.navigation.click(control, 'Facebook Search');
           },
           verify: () => location.pathname.includes('/search/') && this.currentQuery() === app.utils.normalizeText(keyword),
+          typeInput: (input, value) => this.typeFacebookSearchKeyword(input, value, ctx),
+          pressEnter: (input, verify) => this.pressFacebookSearchEnter(input, verify, ctx),
           clickSuggestion: () => this.clickExactSuggestion(keyword, ctx),
           clickSearchButton: async (input) => {
             const formButton = input.closest('form')?.querySelector('button[type="submit"]');
@@ -457,7 +608,7 @@
     }
 
     messageNode(article) {
-      const preferred = ['[data-ad-comet-preview="message"]', '[data-testid="post_message"]', '[data-ad-rendering-role="story_message"]'];
+      const preferred = ['[data-ad-rendering-role="story_message"]', '[data-ad-comet-preview="message"]', '[data-ad-preview="message"]', '[data-testid="post_message"]'];
       for (const selector of preferred) {
         const nodes = this.allVisible(selector, article);
         const topLevel = nodes.filter((node) => !nodes.some((other) => other !== node && other.contains(node)));
@@ -467,11 +618,15 @@
     }
 
     facebookExpandCandidates(postElement, tried = new Set()) {
-      const message = this.messageNode(postElement);
-      const roots = [message, message?.parentElement, postElement].filter(Boolean);
+      const storyMessage = this.visible('[data-ad-rendering-role="story_message"]', postElement);
+      const message = storyMessage || this.messageNode(postElement);
+      const roots = [storyMessage, message, message?.parentElement, postElement].filter(Boolean);
       const found = [];
       roots.forEach((root, priority) => {
-        for (const element of this.allVisible('button, [role="button"], a, span, div, [tabindex], [style*="cursor"]', root)) {
+        const selector = root === storyMessage
+          ? '[role="button"], div[tabindex="0"], span, button, a, [tabindex], [style*="cursor"]'
+          : 'button, [role="button"], a, span, div, [tabindex], [style*="cursor"]';
+        for (const element of this.allVisible(selector, root)) {
           const labels = [element.getAttribute('aria-label'), element.getAttribute('title'), this.text(element)]
             .map((value) => String(value || '').replace(/\s+/g, ' ').trim())
             .filter(Boolean);
@@ -480,7 +635,7 @@
           const clickable = element.closest('div[role="button"], span[role="button"], a, button, [tabindex]') ||
             (getComputedStyle(element).cursor === 'pointer' ? element : null);
           if (!clickable || !postElement.contains(clickable) || tried.has(clickable) || !app.utils.isVisible(clickable)) continue;
-          found.push({ element, clickable, label, priority });
+          found.push({ element, clickable, label, priority, insideStoryMessage: !!storyMessage?.contains(element) });
         }
       });
       const unique = new Map();
@@ -494,14 +649,18 @@
       const tried = new Set();
       let expanded = false;
       for (let attempt = 1; attempt <= 5; attempt++) {
+        const storyMessage = this.visible('[data-ad-rendering-role="story_message"]', postElement);
+        await ctx.logger.info('Facebook Story message found', String(!!storyMessage));
         const candidates = this.facebookExpandCandidates(postElement, tried);
         await ctx.logger.info('Facebook Expand candidates found', String(candidates.length));
         const candidate = candidates[0];
         if (!candidate) break;
         tried.add(candidate.clickable);
+        if (candidate.insideStoryMessage) await ctx.logger.info('Facebook Expand button inside story_message found', candidate.label);
         await ctx.logger.info('Facebook Trying expand candidate', `${candidate.label} (attempt=${attempt}/5)`);
         const before = this.extractPostText(postElement, { broad: true }).text;
         await ctx.logger.info('Facebook Text length before', String(before.length));
+        await ctx.logger.info('Facebook Clicking expand button', candidate.label);
         await ctx.logger.info('Facebook Click expand via parent', candidate.clickable.tagName || candidate.clickable.getAttribute('role') || 'unknown');
         const clicked = await ctx.navigation.click(candidate.clickable, `Facebook expand text: ${candidate.label}`, { scroll: false });
         if (!clicked) {
@@ -513,12 +672,14 @@
         }, { timeoutMs: 1500, intervalMs: 100, token: ctx.token });
         const after = this.extractPostText(postElement, { broad: true }).text;
         await ctx.logger.info('Facebook Text length after', String(after.length));
+        await ctx.logger.info('Facebook Text length before/after', `${before.length} -> ${after.length}`);
         if (!changed || after.length <= before.length) {
           await ctx.logger.warn('Facebook Expand fail', 'text length did not increase; trying next candidate');
           continue;
         }
         expanded = true;
         await ctx.logger.info('Facebook Expand success', `${before.length} -> ${after.length}`);
+        await ctx.logger.info('Facebook Full text expanded', candidate.label);
       }
       return expanded;
     }
@@ -550,8 +711,8 @@
       const header = this.facebookHeaderMetaArea(article);
       const author = this.extractFacebookAuthor(article).author;
       const selectors = options.broad
-        ? '[data-ad-comet-preview="message"], [data-testid="post_message"], [data-ad-rendering-role="story_message"], div[dir="auto"], span[dir="auto"], p, div, span'
-        : '[data-ad-comet-preview="message"], [data-testid="post_message"], [data-ad-rendering-role="story_message"], div[dir="auto"], span[dir="auto"], p';
+        ? '[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"], [data-testid="post_message"], div[dir="auto"], span[dir="auto"], p, div, span'
+        : '[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"], [data-testid="post_message"], div[dir="auto"], span[dir="auto"], p';
       const expandParents = this.facebookExpandCandidates(article).map((candidate) => candidate.clickable.parentElement).filter(Boolean);
       const candidates = this.allVisible(selectors, article).filter((element) => {
         if (header?.contains(element) || element.contains(header)) return false;
@@ -567,7 +728,7 @@
       });
       const ranked = candidates.map((element) => {
         const text = this.cleanPostText(this.text(element));
-        const preferred = element.matches('[data-ad-comet-preview="message"], [data-testid="post_message"], [data-ad-rendering-role="story_message"]');
+        const preferred = element.matches('[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"], [data-testid="post_message"]');
         const nearExpand = expandParents.some((parent) => parent.contains(element) || element.contains(parent));
         const controls = element.querySelectorAll('button, [role="button"], [role="menu"]').length;
         return { element, text, score: Math.min(text.length, 2000) + (preferred ? 1000 : 0) + (nearExpand ? 300 : 0) - controls * 100 };
@@ -580,26 +741,46 @@
     extractFacebookAuthor(postElement) {
       const permalink = this.permalinkAnchors(postElement)[0]?.link || null;
       const header = this.facebookHeaderMetaArea(postElement, permalink);
-      const scope = header || postElement;
+      const profile = this.primaryFacebookProfileBlock(postElement);
       const postRect = postElement.getBoundingClientRect();
       const topLimit = postRect.top + Math.min(300, Math.max(160, postRect.height * 0.35));
-      const candidates = this.allVisible('h1 a[href], h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', scope).map((link) => {
+      const tiers = [
+        { source: 'profile_name', priority: 300, links: profile ? this.allVisible('a[role="link"][href]', profile) : [] },
+        { source: 'h3 header', priority: 200, links: header ? this.allVisible('h3 a[role="link"][href], h4 a[role="link"][href]', header) : [] },
+        { source: 'top header', priority: 100, links: this.allVisible('h1 a[href], h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', header || postElement) }
+      ];
+      const diagnostics = [];
+      const candidates = [];
+      const seen = new Set();
+      for (const tier of tiers) for (const link of tier.links) {
+        if (seen.has(link)) continue;
+        seen.add(link);
         const author = this.text(link);
-        if (!author || author.length > 120 || hasTemporalEvidence(author) || this.isFacebookUiText(author)) return null;
-        if (this.normalizePostUrl(link.href) || link.querySelector('img, video')) return null;
-        if (link.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"]')) return null;
+        let reason = '';
+        if (!author || author.length > 120 || hasTemporalEvidence(author)) reason = 'action';
+        else if (link.closest('[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"]')) reason = 'body';
+        else if (this.normalizePostUrl(link.href) || link.querySelector('img, video') || link.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"]')) reason = 'media';
+        else if (link.closest('form, [role="comment"], [data-ad-rendering-role*="comment"], [data-ad-rendering-role*="reaction"], [data-ad-rendering-role*="share"]') || this.isFacebookUiText(author)) reason = 'comment/action';
         const rect = link.getBoundingClientRect();
-        if (rect.top > topLimit) return null;
+        if (!reason && rect.top > topLimit) reason = 'link-preview';
         try {
           const url = new URL(link.href, location.origin);
-          if (!/(^|\.)facebook\.com$/i.test(url.hostname)) return null;
-          if (/(^|\/)(photos?|videos?|reel|posts|permalink|comments?|reactions?|share)(\/|$)/i.test(url.pathname) || url.searchParams.has('fbid') || url.searchParams.has('story_fbid')) return null;
+          if (!reason && !/(^|\.)facebook\.com$/i.test(url.hostname)) reason = 'external';
+          if (!reason && (/(^|\/)(photos?|videos?|reel|posts|permalink|comments?|reactions?|share)(\/|$)/i.test(url.pathname) || url.searchParams.has('fbid') || url.searchParams.has('story_fbid'))) reason = 'media/comment/action';
+          if (reason) {
+            diagnostics.push({ accepted: false, source: tier.source, value: author || link.href, reason });
+            continue;
+          }
           const heading = !!link.closest('h1, h2, h3, h4, strong');
-          const score = (header?.contains(link) ? 100 : 0) + (heading ? 80 : 0) + (link.getAttribute('role') === 'link' ? 20 : 0) - author.length / 10;
-          return { author, authorUrl: url.toString(), element: link, score };
-        } catch (error) { return null; }
-      }).filter(Boolean).sort((left, right) => right.score - left.score);
-      return candidates[0] || { author: '', authorUrl: '', element: null, score: 0 };
+          const score = tier.priority + (header?.contains(link) ? 100 : 0) + (heading ? 80 : 0) + (link.getAttribute('role') === 'link' ? 20 : 0) - author.length / 10;
+          candidates.push({ author, authorUrl: link.href || url.toString(), element: link, score, source: tier.source });
+          diagnostics.push({ accepted: true, source: tier.source, value: author, reason: '' });
+        } catch (error) {
+          diagnostics.push({ accepted: false, source: tier.source, value: author || link.href, reason: 'external' });
+        }
+      }
+      candidates.sort((left, right) => right.score - left.score);
+      return candidates[0] ? { ...candidates[0], diagnostics } : { author: '', authorUrl: '', element: null, score: 0, source: '', diagnostics };
     }
 
     extractFacebookMedia(postElement) {
@@ -633,7 +814,82 @@
       return parsed ? { value: text, element, score, source, parsed } : null;
     }
 
+    primaryFacebookProfileBlock(postElement) {
+      const postRect = postElement.getBoundingClientRect();
+      const topLimit = postRect.top + Math.min(320, Math.max(180, postRect.height * 0.35));
+      return this.allVisible('[data-ad-rendering-role="profile_name"]', postElement)
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.top <= topLimit && !!element.querySelector('a[role="link"][href]');
+        })
+        .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top)[0] || null;
+    }
+
+    facebookHeaderFromProfile(postElement, profileBlock = this.primaryFacebookProfileBlock(postElement)) {
+      if (!profileBlock) return null;
+      const timestampSelector = 'a[aria-label][href*="/posts/"], a[aria-label][href*="story_fbid"], a[aria-label][href*="fbid="], a[role="link"][href*="/posts/"]';
+      let fallback = profileBlock.parentElement;
+      for (let current = profileBlock.parentElement, depth = 1; current && current !== postElement && depth <= 10; current = current.parentElement, depth++) {
+        const rect = current.getBoundingClientRect();
+        if (rect.height > 320) break;
+        fallback = current;
+        if (current.querySelector(timestampSelector)) return current;
+      }
+      return fallback;
+    }
+
+    facebookTimestampLink(postElement, header = null) {
+      const selector = 'a[aria-label][href*="/posts/"], a[aria-label][href*="story_fbid"], a[aria-label][href*="fbid="], a[role="link"][href*="/posts/"]';
+      const profile = this.primaryFacebookProfileBlock(postElement);
+      const profileRect = profile?.getBoundingClientRect();
+      const headerLinks = header ? this.allVisible(selector, header) : [];
+      const links = headerLinks.length ? headerLinks : this.allVisible(selector, postElement);
+      return links.filter((link) => {
+        if (this.rejectedDateElement(link, postElement)) return false;
+        if (link.closest('[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"], figure, [data-visualcompletion="media-vc-image"]')) return false;
+        const label = link.getAttribute('aria-label') || this.text(link);
+        if (!label || label.length > 80 || isMediaTooltipText(label) || /(shared with|доступно всем|поделился|may be an image)/i.test(label)) return false;
+        if (!profileRect) return true;
+        const rect = link.getBoundingClientRect();
+        return Math.abs(rect.top - profileRect.bottom) <= 160 || Math.abs(rect.top - profileRect.top) <= 180;
+      }).sort((left, right) => {
+        const leftLabel = left.getAttribute('aria-label') || this.text(left);
+        const rightLabel = right.getAttribute('aria-label') || this.text(right);
+        return Number(hasTemporalEvidence(rightLabel)) - Number(hasTemporalEvidence(leftLabel));
+      })[0] || null;
+    }
+
+    async extractDateFromProfileHeader(postElement, ctx) {
+      const profile = this.primaryFacebookProfileBlock(postElement);
+      const header = this.facebookHeaderFromProfile(postElement, profile);
+      const timestamp = this.facebookTimestampLink(postElement, header);
+      if (!timestamp) return null;
+      await ctx.logger.info('Facebook Timestamp link found from header', timestamp.href);
+      const label = String(timestamp.getAttribute('aria-label') || this.text(timestamp)).replace(/\u00a0/g, ' ').trim();
+      await ctx.logger.info('Facebook Timestamp aria-label', label || 'empty');
+      if (!label || isMediaTooltipText(label)) {
+        await ctx.logger.warn('Facebook Date rejected', 'reason=visibility/media/body');
+        return null;
+      }
+      const labelDate = parseFacebookDate(label);
+      const relative = /^(yesterday|вчера|\d+\s*(s|sec|m|min|h|hr|d|day|days|ч|час|д|дн|мин))/iu.test(label.replace(/\./g, ''));
+      if (labelDate && relative) await ctx.logger.info('Facebook Relative date parsed', app.utils.formatTimestamp(labelDate));
+      if (labelDate && !relative) {
+        await ctx.logger.info('Facebook timestamp aria-label parsed', app.utils.formatTimestamp(labelDate));
+        return labelDate;
+      }
+      await ctx.logger.info('Facebook Hovering timestamp link for full date');
+      const hovered = await this.hoverHeaderDateCandidate(timestamp, 'profile header timestamp link', ctx);
+      if (hovered?.parsed) {
+        await ctx.logger.info('Facebook Tooltip date parsed', app.utils.formatTimestamp(hovered.parsed));
+        return hovered.parsed;
+      }
+      return labelDate;
+    }
+
     facebookHeaderMetaArea(article, permalink = null) {
+      const profileHeader = this.facebookHeaderFromProfile(article);
+      if (profileHeader) return profileHeader;
       const articleRect = article.getBoundingClientRect();
       const inHeaderBand = (element) => {
         const rect = element.getBoundingClientRect();
@@ -870,6 +1126,11 @@
     }
 
     async extractDate(article, ctx, postUrl = '') {
+      const profileHeaderDate = await this.extractDateFromProfileHeader(article, ctx);
+      if (profileHeaderDate) {
+        await ctx.logger.info('Facebook Date parse result', app.utils.formatTimestamp(profileHeaderDate));
+        return profileHeaderDate;
+      }
       const headerDate = await this.parseFacebookDateFromHeaderHover(article, ctx, postUrl);
       if (headerDate) {
         await ctx.logger.info('Facebook Date parse result', headerDate);
@@ -995,7 +1256,11 @@
       else await ctx.logger.warn('Facebook post genuinely has no text; saving without synthetic text', postUrl);
 
       const authorResult = this.extractFacebookAuthor(postElement);
-      if (authorResult.author) await ctx.logger.info('Facebook author extracted', `${authorResult.author} -> ${authorResult.authorUrl}`);
+      for (const diagnostic of authorResult.diagnostics || []) {
+        if (diagnostic.source === 'profile_name') await ctx.logger.info('Facebook Author candidate from profile_name', diagnostic.value);
+        if (!diagnostic.accepted) await ctx.logger.warn('Facebook Author candidate rejected', `reason=${diagnostic.reason}, value=${diagnostic.value}`);
+      }
+      if (authorResult.author) await ctx.logger.info('Facebook Author accepted', `${authorResult.author} -> ${authorResult.authorUrl}`);
       else await ctx.logger.warn('Facebook author was not found in header/meta area', postUrl);
 
       const postDate = await this.extractDate(postElement, ctx, postUrl);
