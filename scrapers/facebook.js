@@ -21,9 +21,28 @@
   }
 
   const MEDIA_TOOLTIP_PATTERN = /(may be an image|may be a video|image may contain|video may contain|может быть изображение|может быть видео|на изображении может быть|на видео может быть)/i;
+  const FACEBOOK_EXPAND_PATTERN = /^(see more|see more\.\.\.|more|read more|show more|ещё|еще|показать ещё|показать еще|показать больше|daha çox|daha cox|devamını gör|devamini gor)$/i;
 
   function isMediaTooltipText(value) {
     return MEDIA_TOOLTIP_PATTERN.test(String(value || '').replace(/\s+/g, ' ').trim());
+  }
+
+  function isFacebookExpandLabel(value) {
+    return FACEBOOK_EXPAND_PATTERN.test(String(value || '').replace(/\s+/g, ' ').trim());
+  }
+
+  function scoreFacebookContainerSignals(signals) {
+    let score = 0;
+    if (signals.hasAuthor) score += 5;
+    if (signals.hasText) score += 6;
+    if (signals.hasExpand) score += 4;
+    if (signals.hasDateMeta) score += 4;
+    if (signals.hasPermalink) score += 6;
+    if (signals.hasMedia) score += 2;
+    if (signals.hasEngagement) score += 3;
+    if (signals.tooLarge) score -= 8;
+    if (signals.isFeed) score -= 100;
+    return score;
   }
 
   function hasTemporalEvidence(value) {
@@ -348,38 +367,97 @@
       }).filter(Boolean).sort((left, right) => right.score - left.score);
     }
 
-    postElementFromPermalink(root, postUrl = '') {
-      const anchors = this.permalinkAnchors(root, postUrl);
-      const anchor = anchors.find((candidate) => !candidate.media)?.link || anchors[0]?.link || null;
-      if (!anchor) return root;
-      const semantic = anchor.closest('article, [role="article"], [data-pagelet*="FeedUnit"]');
-      if (semantic && app.utils.isVisible(semantic)) return semantic;
+    facebookContainerSignals(element) {
+      const rect = element.getBoundingClientRect();
+      const text = this.text(element);
+      const postUrls = new Set(Array.from(element.querySelectorAll('a[href]')).map((link) => this.normalizePostUrl(link.href)).filter(Boolean));
+      const authorLinks = this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', element).filter((link) => {
+        const value = this.text(link);
+        if (!value || value.length > 120 || this.normalizePostUrl(link.href) || hasTemporalEvidence(value)) return false;
+        try {
+          const url = new URL(link.href, location.origin);
+          return /(^|\.)facebook\.com$/i.test(url.hostname) && !/(^|\/)(photos?|videos?|reel|posts|permalink|comments?|reactions?|share)(\/|$)/i.test(url.pathname);
+        } catch (error) { return false; }
+      });
+      const hasExpand = this.allVisible('button, [role="button"], a, span, div, [tabindex]', element).some((node) => {
+        return [node.getAttribute('aria-label'), this.text(node)].some(isFacebookExpandLabel);
+      });
+      const hasDateMeta = !!element.querySelector('time, [data-utime], abbr[title]') || this.allVisible('a, span, [aria-label]', element).some((node) => {
+        const value = node.getAttribute('aria-label') || node.getAttribute('title') || this.text(node);
+        return String(value || '').length <= 80 && hasTemporalEvidence(value);
+      });
+      const hasMedia = this.allVisible('img[src], video', element).some((node) => {
+        const nodeRect = node.getBoundingClientRect();
+        return node.matches('video') || nodeRect.width >= 140 || nodeRect.height >= 140;
+      });
+      const engagementText = app.utils.normalizeText(text.slice(-1200));
+      const hasEngagement = /(like|comment|share|reaction|нравится|комментар|поделиться|bəyən|şərh|paylaş)/i.test(engagementText) ||
+        !!element.querySelector('[aria-label*="Like" i], [aria-label*="Comment" i], [aria-label*="Share" i]');
+      const role = element.getAttribute('role');
+      const nestedPostContainers = element.querySelectorAll('article, [role="article"], [data-pagelet*="FeedUnit"]').length;
+      const isFeed = role === 'feed' || element === document.body || element === document.documentElement || nestedPostContainers > 2 || (rect.height > 5000 && postUrls.size > 5);
+      const signals = {
+        hasAuthor: authorLinks.length > 0,
+        hasText: !!this.messageNode(element),
+        hasExpand,
+        hasDateMeta,
+        hasPermalink: postUrls.size > 0,
+        hasMedia,
+        hasEngagement,
+        tooLarge: rect.height > 4500 || rect.width > Math.max(window.innerWidth * 1.25, 1800),
+        isFeed
+      };
+      return { ...signals, score: scoreFacebookContainerSignals(signals), height: rect.height, width: rect.width };
+    }
+
+    findFacebookPostContainer(seedElement) {
+      const seed = seedElement?.nodeType === 3 ? seedElement.parentElement : seedElement;
+      if (!seed) return { element: null, score: -Infinity, signals: null, trace: [] };
+      const trace = [];
       let best = null;
-      for (let current = anchor.parentElement, depth = 0; current && depth < 16; current = current.parentElement, depth++) {
-        const rect = current.getBoundingClientRect();
-        if (rect.height >= 5000) break;
-        if (rect.height < 160 || rect.width < 260) continue;
-        const hasMessage = !!this.messageNode(current);
-        const hasMedia = !!current.querySelector('img[src], video');
-        const hasAuthor = !!current.querySelector('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]');
-        if ((hasMessage || hasMedia) && hasAuthor) {
-          best = current;
+      let current = seed.matches?.('a, img, video, span') ? seed.parentElement : seed;
+      for (let level = 1; current && level <= 20; level++, current = current.parentElement) {
+        if (!app.utils.isVisible(current)) continue;
+        const signals = this.facebookContainerSignals(current);
+        trace.push({ level, element: current, ...signals });
+        const hasContent = signals.hasText || signals.hasExpand || signals.hasMedia;
+        const hasIdentity = signals.hasAuthor || signals.hasDateMeta || signals.hasText;
+        const sufficient = !signals.isFeed && signals.hasPermalink && hasContent && hasIdentity && signals.score >= 11;
+        if (sufficient) {
+          best = { element: current, score: signals.score, signals, level };
           break;
         }
-        if (current === root) break;
+        if (!signals.isFeed && (!best || signals.score > best.score)) best = { element: current, score: signals.score, signals, level };
+        if (signals.isFeed || current === document.body) break;
       }
-      return best || root;
+      return { ...(best || { element: seed, score: 0, signals: this.facebookContainerSignals(seed), level: 0 }), trace };
+    }
+
+    async logFacebookContainerSelection(selection, ctx) {
+      for (const candidate of selection.trace || []) {
+        await ctx.logger.info(`Facebook Container candidate level=${candidate.level} score=${candidate.score}`, `author=${candidate.hasAuthor}, text=${candidate.hasText}, expand=${candidate.hasExpand}, date=${candidate.hasDateMeta}, permalink=${candidate.hasPermalink}, media=${candidate.hasMedia}, engagement=${candidate.hasEngagement}`);
+      }
+      const signals = selection.signals || {};
+      await ctx.logger.info('Facebook Selected container score', String(selection.score));
+      await ctx.logger.info('Facebook Selected container hasAuthor', String(!!signals.hasAuthor));
+      await ctx.logger.info('Facebook Selected container hasText', String(!!signals.hasText));
+      await ctx.logger.info('Facebook Selected container hasExpand', String(!!signals.hasExpand));
+      await ctx.logger.info('Facebook Selected container hasDateMeta', String(!!signals.hasDateMeta));
     }
 
     resolvePostContext(root) {
-      const postUrl = this.postUrlForArticle(root);
-      const postElement = this.postElementFromPermalink(root, postUrl);
+      const initialPostUrl = this.postUrlForArticle(root);
+      const anchors = this.permalinkAnchors(root, initialPostUrl);
+      const seed = anchors.find((candidate) => !candidate.media)?.link || anchors[0]?.link || root;
+      const selection = this.findFacebookPostContainer(seed);
+      const postElement = selection.element || root;
+      const postUrl = this.postUrlForArticle(postElement) || initialPostUrl;
       const permalink = this.permalinkAnchors(postElement, postUrl)[0]?.link || null;
-      return { postUrl, postElement, permalink };
+      return { postUrl, postElement, permalink, selection };
     }
 
     messageNode(article) {
-      const preferred = ['[data-ad-comet-preview="message"]', '[data-testid="post_message"]'];
+      const preferred = ['[data-ad-comet-preview="message"]', '[data-testid="post_message"]', '[data-ad-rendering-role="story_message"]'];
       for (const selector of preferred) {
         const nodes = this.allVisible(selector, article);
         const topLevel = nodes.filter((node) => !nodes.some((other) => other !== node && other.contains(node)));
@@ -388,96 +466,164 @@
       return null;
     }
 
-    async expandPostText(article, ctx) {
-      const expandPattern = /^(see more|see more\.\.\.|more|read more|show more|ещё|еще|показать ещё|показать еще|показать больше|daha çox|daha cox|devamını gör|devamini gor)$/i;
+    facebookExpandCandidates(postElement, tried = new Set()) {
+      const message = this.messageNode(postElement);
+      const roots = [message, message?.parentElement, postElement].filter(Boolean);
+      const found = [];
+      roots.forEach((root, priority) => {
+        for (const element of this.allVisible('button, [role="button"], a, span, div, [tabindex], [style*="cursor"]', root)) {
+          const labels = [element.getAttribute('aria-label'), element.getAttribute('title'), this.text(element)]
+            .map((value) => String(value || '').replace(/\s+/g, ' ').trim())
+            .filter(Boolean);
+          const label = labels.find((value) => value.length <= 60 && isFacebookExpandLabel(value));
+          if (!label || (priority === 2 && /^more$/i.test(label))) continue;
+          const clickable = element.closest('div[role="button"], span[role="button"], a, button, [tabindex]') ||
+            (getComputedStyle(element).cursor === 'pointer' ? element : null);
+          if (!clickable || !postElement.contains(clickable) || tried.has(clickable) || !app.utils.isVisible(clickable)) continue;
+          found.push({ element, clickable, label, priority });
+        }
+      });
+      const unique = new Map();
+      for (const candidate of found.sort((left, right) => left.priority - right.priority)) {
+        if (!unique.has(candidate.clickable)) unique.set(candidate.clickable, candidate);
+      }
+      return Array.from(unique.values());
+    }
+
+    async expandFacebookFullText(postElement, ctx) {
       const tried = new Set();
       let expanded = false;
       for (let attempt = 1; attempt <= 5; attempt++) {
-        const message = this.messageNode(article);
-        const roots = [message, message?.parentElement, article].filter(Boolean);
-        const found = [];
-        roots.forEach((root, priority) => {
-          for (const element of this.allVisible('button, [role="button"], a, span, div', root)) {
-            const labels = [element.getAttribute('aria-label'), this.text(element)].map((value) => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
-            const label = labels.find((value) => value.length <= 60 && expandPattern.test(value));
-            if (!label) continue;
-            if (priority === 2 && /^more$/i.test(label)) continue;
-            const clickable = element.closest('button, a, [role="button"]') || this.clickable(element);
-            if (!clickable || !article.contains(clickable) || tried.has(clickable)) continue;
-            found.push({ element, clickable, label, priority });
-          }
-        });
-        const uniqueCandidates = new Map();
-        for (const candidate of found.sort((left, right) => left.priority - right.priority)) {
-          if (!uniqueCandidates.has(candidate.clickable)) uniqueCandidates.set(candidate.clickable, candidate);
-        }
-        const candidates = Array.from(uniqueCandidates.values());
+        const candidates = this.facebookExpandCandidates(postElement, tried);
         await ctx.logger.info('Facebook Expand candidates found', String(candidates.length));
         const candidate = candidates[0];
-        if (!candidate) {
-          if (!expanded) await ctx.logger.info('Facebook expand text button not found; text is already complete or unavailable');
-          break;
-        }
+        if (!candidate) break;
         tried.add(candidate.clickable);
-        await ctx.logger.info('Facebook Expand candidate text', candidate.label);
-        const beforeNode = this.messageNode(article) || article;
-        const beforeText = this.text(beforeNode);
-        const beforeHeight = beforeNode.getBoundingClientRect().height;
+        await ctx.logger.info('Facebook Trying expand candidate', `${candidate.label} (attempt=${attempt}/5)`);
+        const before = this.extractPostText(postElement, { broad: true }).text;
+        await ctx.logger.info('Facebook Text length before', String(before.length));
+        await ctx.logger.info('Facebook Click expand via parent', candidate.clickable.tagName || candidate.clickable.getAttribute('role') || 'unknown');
         const clicked = await ctx.navigation.click(candidate.clickable, `Facebook expand text: ${candidate.label}`, { scroll: false });
         if (!clicked) {
-          await ctx.logger.warn('Facebook Expand failed, trying next candidate', `attempt=${attempt}/5`);
+          await ctx.logger.warn('Facebook Expand fail', 'click was not performed');
           continue;
         }
-        await ctx.logger.info('Facebook Clicked expand candidate via parent', candidate.clickable.tagName || candidate.clickable.getAttribute('role') || 'unknown');
         const changed = await app.utils.waitFor(() => {
-          const current = this.messageNode(article) || article;
-          return this.text(current).length > beforeText.length || current.getBoundingClientRect().height > beforeHeight + 2 || !candidate.clickable.isConnected;
-        }, { timeoutMs: 5000, intervalMs: 250, token: ctx.token });
-        const afterNode = this.messageNode(article) || article;
-        const afterText = this.text(afterNode);
-        await ctx.logger.info('Facebook Text length before/after', `${beforeText.length} -> ${afterText.length}`);
-        if (!changed || afterText.length <= beforeText.length) {
-          await ctx.logger.warn('Facebook Expand failed, trying next candidate', `attempt=${attempt}/5`);
+          return this.extractPostText(postElement, { broad: true }).text.length > before.length;
+        }, { timeoutMs: 1500, intervalMs: 100, token: ctx.token });
+        const after = this.extractPostText(postElement, { broad: true }).text;
+        await ctx.logger.info('Facebook Text length after', String(after.length));
+        if (!changed || after.length <= before.length) {
+          await ctx.logger.warn('Facebook Expand fail', 'text length did not increase; trying next candidate');
           continue;
         }
         expanded = true;
+        await ctx.logger.info('Facebook Expand success', `${before.length} -> ${after.length}`);
       }
       return expanded;
     }
 
+    async expandPostText(postElement, ctx) {
+      return this.expandFacebookFullText(postElement, ctx);
+    }
+
     cleanPostText(value) {
       return String(value || '')
-        .replace(/\s+(see more|read more|ещё|еще|показать ещё|показать еще|daha çox|daha cox)$/i, '')
+        .replace(/\s+(see more|more|read more|show more|ещё|еще|показать ещё|показать еще|показать больше|daha çox|daha cox|devamını gör|devamini gor)$/i, '')
         .replace(/\s+/g, ' ')
         .trim();
+    }
+
+    isFacebookUiText(value) {
+      const text = app.utils.normalizeText(value);
+      if (!text || isMediaTooltipText(text) || isFacebookExpandLabel(text)) return true;
+      if (text.length > 180) return false;
+      return /^(like|comment|share|send|follow|join|sponsored|all reactions|нравится|комментировать|поделиться|отправить|подписаться|вступить|реклама|bəyən|şərh|paylaş)(\s|$)/i.test(text) ||
+        /^\d+[\d.,km]*\s*(likes?|comments?|shares?|reactions?|нравится|комментар|репост)/i.test(text);
     }
 
     extractPostText(article, options = {}) {
       const message = this.messageNode(article);
       const messageText = this.cleanPostText(this.text(message));
-      if (messageText && !isMediaTooltipText(messageText)) return { text: messageText, source: 'message node' };
+      if (messageText && !this.isFacebookUiText(messageText)) return { text: messageText, source: 'message node' };
 
       const header = this.facebookHeaderMetaArea(article);
-      const author = this.text(this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href]', article)[0]);
+      const author = this.extractFacebookAuthor(article).author;
       const selectors = options.broad
         ? '[data-ad-comet-preview="message"], [data-testid="post_message"], [data-ad-rendering-role="story_message"], div[dir="auto"], span[dir="auto"], p, div, span'
         : '[data-ad-comet-preview="message"], [data-testid="post_message"], [data-ad-rendering-role="story_message"], div[dir="auto"], span[dir="auto"], p';
+      const expandParents = this.facebookExpandCandidates(article).map((candidate) => candidate.clickable.parentElement).filter(Boolean);
       const candidates = this.allVisible(selectors, article).filter((element) => {
         if (header?.contains(element) || element.contains(header)) return false;
         if (element.closest('button, [role="button"], [role="menu"], [role="tooltip"]')) return false;
         if (element.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"]')) return false;
         if (element.matches('img, video, svg') || element.querySelector('img, video')) return false;
         const text = this.cleanPostText(this.text(element));
-        if (!text || text === author || isMediaTooltipText(text)) return false;
-        if (text.length <= 80 && (hasTemporalEvidence(text) || /^(see more|read more|ещё|еще|like|comment|share)$/i.test(text))) return false;
+        if (!text || text === author || this.isFacebookUiText(text)) return false;
+        if (text.length <= 80 && hasTemporalEvidence(text)) return false;
         const rect = element.getBoundingClientRect();
         const articleRect = article.getBoundingClientRect();
         return rect.top >= articleRect.top && rect.height < articleRect.height * 0.8;
       });
-      const ranked = candidates.map((element) => ({ element, text: this.cleanPostText(this.text(element)) }))
+      const ranked = candidates.map((element) => {
+        const text = this.cleanPostText(this.text(element));
+        const preferred = element.matches('[data-ad-comet-preview="message"], [data-testid="post_message"], [data-ad-rendering-role="story_message"]');
+        const nearExpand = expandParents.some((parent) => parent.contains(element) || element.contains(parent));
+        const controls = element.querySelectorAll('button, [role="button"], [role="menu"]').length;
+        return { element, text, score: Math.min(text.length, 2000) + (preferred ? 1000 : 0) + (nearExpand ? 300 : 0) - controls * 100 };
+      })
         .filter((candidate) => candidate.text.length <= 20000)
-        .sort((left, right) => right.text.length - left.text.length);
+        .sort((left, right) => right.score - left.score || right.text.length - left.text.length);
       return ranked[0] ? { text: ranked[0].text, source: options.broad ? 'broad post container' : 'alternate message node' } : { text: '', source: 'none' };
+    }
+
+    extractFacebookAuthor(postElement) {
+      const permalink = this.permalinkAnchors(postElement)[0]?.link || null;
+      const header = this.facebookHeaderMetaArea(postElement, permalink);
+      const scope = header || postElement;
+      const postRect = postElement.getBoundingClientRect();
+      const topLimit = postRect.top + Math.min(300, Math.max(160, postRect.height * 0.35));
+      const candidates = this.allVisible('h1 a[href], h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', scope).map((link) => {
+        const author = this.text(link);
+        if (!author || author.length > 120 || hasTemporalEvidence(author) || this.isFacebookUiText(author)) return null;
+        if (this.normalizePostUrl(link.href) || link.querySelector('img, video')) return null;
+        if (link.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"]')) return null;
+        const rect = link.getBoundingClientRect();
+        if (rect.top > topLimit) return null;
+        try {
+          const url = new URL(link.href, location.origin);
+          if (!/(^|\.)facebook\.com$/i.test(url.hostname)) return null;
+          if (/(^|\/)(photos?|videos?|reel|posts|permalink|comments?|reactions?|share)(\/|$)/i.test(url.pathname) || url.searchParams.has('fbid') || url.searchParams.has('story_fbid')) return null;
+          const heading = !!link.closest('h1, h2, h3, h4, strong');
+          const score = (header?.contains(link) ? 100 : 0) + (heading ? 80 : 0) + (link.getAttribute('role') === 'link' ? 20 : 0) - author.length / 10;
+          return { author, authorUrl: url.toString(), element: link, score };
+        } catch (error) { return null; }
+      }).filter(Boolean).sort((left, right) => right.score - left.score);
+      return candidates[0] || { author: '', authorUrl: '', element: null, score: 0 };
+    }
+
+    extractFacebookMedia(postElement) {
+      const urls = new Set();
+      const header = this.facebookHeaderMetaArea(postElement, this.permalinkAnchors(postElement)[0]?.link || null);
+      const add = (value) => {
+        const url = String(value || '').trim();
+        if (!url || url.startsWith('data:') || url.startsWith('blob:') || /emoji|rsrc\.php/i.test(url)) return;
+        urls.add(url);
+      };
+      for (const image of postElement.querySelectorAll('img[src]')) {
+        if (!app.utils.isVisible(image) || header?.contains(image) || /avatar|profile picture|emoji|icon/i.test(image.alt || '')) continue;
+        const rect = image.getBoundingClientRect();
+        const url = image.currentSrc || image.src || image.getAttribute('src');
+        const largeEnough = rect.width >= 150 || rect.height >= 150 || (rect.width >= 100 && image.naturalWidth >= 300 && /scontent|fbcdn/i.test(url || ''));
+        if (largeEnough) add(url);
+      }
+      for (const video of postElement.querySelectorAll('video')) {
+        const videoUrls = [video.currentSrc, video.src, video.getAttribute('src'), ...Array.from(video.querySelectorAll('source[src]')).map((source) => source.src || source.getAttribute('src'))]
+          .filter((value) => value && !String(value).startsWith('blob:'));
+        videoUrls.forEach(add);
+        if (!videoUrls.length) add(video.poster);
+      }
+      return Array.from(urls);
     }
 
     dateCandidate(value, element, score, source) {
@@ -768,19 +914,7 @@
     }
 
     ancestorPostContainer(node) {
-      const semantic = node?.closest?.('article, [role="article"], [data-pagelet*="FeedUnit"]');
-      if (semantic && app.utils.isVisible(semantic)) return semantic;
-      let current = node?.parentElement || null;
-      for (let depth = 0; current && depth < 14; depth++, current = current.parentElement) {
-        const rect = current.getBoundingClientRect();
-        if (rect.height > 140 && rect.height < 4200 && rect.width > 280) {
-          const hasPermalink = Array.from(current.querySelectorAll('a[href]')).some((link) => this.normalizePostUrl(link.href));
-          const hasContent = !!this.messageNode(current) || !!current.querySelector('time, [data-utime], img[src], video');
-          if (hasPermalink && hasContent) return current;
-        }
-        if (rect.height >= 5000) break;
-      }
-      return null;
+      return this.findFacebookPostContainer(node).element || null;
     }
 
     discoverPostContainers() {
@@ -839,10 +973,11 @@
     }
 
     async parseArticle(article, ctx) {
-      if (this.isAdvertisement(article)) return { advertisement: true };
       const context = this.resolvePostContext(article);
       const postElement = context.postElement || article;
       const postUrl = context.postUrl;
+      await this.logFacebookContainerSelection(context.selection, ctx);
+      if (this.isAdvertisement(postElement)) return { advertisement: true };
       await ctx.logger.info('Facebook Post URL', postUrl || 'unavailable');
       await ctx.logger.info('Facebook Date limit enabled', String(!!ctx.state.dateLimit));
       if (!postUrl) {
@@ -859,23 +994,28 @@
       if (textResult.text) await ctx.logger.info('Facebook post text extracted', `source=${textResult.source}, length=${textResult.text.length}`);
       else await ctx.logger.warn('Facebook post genuinely has no text; saving without synthetic text', postUrl);
 
+      const authorResult = this.extractFacebookAuthor(postElement);
+      if (authorResult.author) await ctx.logger.info('Facebook author extracted', `${authorResult.author} -> ${authorResult.authorUrl}`);
+      else await ctx.logger.warn('Facebook author was not found in header/meta area', postUrl);
+
       const postDate = await this.extractDate(postElement, ctx, postUrl);
       if (!postDate && ctx.state.dateLimit) {
         await ctx.logger.warn('Facebook Post saved/skipped reason', 'skipped: date unavailable while date limit is enabled');
         return null;
       }
       if (!postDate) await ctx.logger.warn('Facebook date unavailable; post will be saved with postDate=null because date limit is disabled', postUrl);
-      const authorLink = this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', postElement)
-        .find((link) => !this.normalizePostUrl(link.href) && this.text(link));
-      const mediaUrls = [
-        ...Array.from(postElement.querySelectorAll('img[src]')).filter((image) => image.width > 150 || image.naturalWidth > 150).map((image) => image.currentSrc || image.src),
-        ...Array.from(postElement.querySelectorAll('video')).map((video) => video.poster || video.src)
-      ].filter(Boolean);
+      const mediaUrls = this.extractFacebookMedia(postElement);
+      await ctx.logger.info('Facebook media URLs extracted', String(mediaUrls.length));
+      const populatedFields = [authorResult.author, textResult.text, postDate, mediaUrls.length ? mediaUrls : null].filter(Boolean).length;
+      if (populatedFields < 2) {
+        await ctx.logger.warn('Facebook Post saved/skipped reason', `skipped: insufficient parsed fields (author=${!!authorResult.author}, text=${!!textResult.text}, date=${!!postDate}, media=${mediaUrls.length})`);
+        return null;
+      }
       return {
         postDate: postDate ? app.utils.formatTimestamp(postDate) : null,
         postUrl,
-        author: this.text(authorLink) || 'Unknown',
-        authorUrl: authorLink?.href || '',
+        author: authorResult.author,
+        authorUrl: authorResult.authorUrl,
         text: textResult.text,
         mediaUrls
       };
@@ -886,7 +1026,7 @@
     }
 
     postKeyForArticle(article) {
-      const postUrl = this.postUrlForArticle(article);
+      const postUrl = this.resolvePostContext(article).postUrl;
       if (postUrl) return postUrl;
       const signature = this.text(this.messageNode(article) || article).slice(0, 240);
       return signature ? `facebook:text:${signature}` : '';
@@ -1040,5 +1180,7 @@
   app.parsers.facebookDate = parseFacebookDate;
   app.parsers.facebookDateText = looksLikeFacebookDate;
   app.parsers.facebookMediaTooltip = isMediaTooltipText;
+  app.parsers.facebookContainerScore = scoreFacebookContainerSignals;
+  app.parsers.facebookExpandLabel = isFacebookExpandLabel;
   app.scrapers.facebook = new FacebookScraper();
 })(globalThis.ScraperApp);
