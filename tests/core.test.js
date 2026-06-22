@@ -116,6 +116,7 @@ test('Facebook parses localized relative dates', () => {
   const now = new Date(2026, 5, 20, 12, 0, 0);
   assert.equal(app.parsers.facebookDate('2 min ago', now).getTime(), now.getTime() - 120000);
   assert.equal(app.parsers.facebookDate('7 ч', now).getTime(), now.getTime() - 7 * 3600000);
+  assert.equal(app.parsers.facebookDate('2 дн.', now).getTime(), now.getTime() - 2 * 86400000);
   assert.equal(app.parsers.facebookDate('3 weeks ago', now).getTime(), now.getTime() - 21 * 86400000);
   const twoMonths = app.parsers.facebookDate('2 месяца', now);
   assert.equal(twoMonths.getMonth(), 3);
@@ -123,7 +124,36 @@ test('Facebook parses localized relative dates', () => {
   assert.equal(yesterday.getDate(), 19);
   assert.equal(yesterday.getHours(), 21);
   assert.equal(yesterday.getMinutes(), 10);
+  const htmlTimestamp = app.parsers.facebookDate('14 июнь в 19:02', now);
+  assert.equal(htmlTimestamp.getMonth(), 5);
+  assert.equal(htmlTimestamp.getDate(), 14);
+  assert.equal(htmlTimestamp.getHours(), 19);
+  assert.equal(htmlTimestamp.getMinutes(), 2);
   assert.equal(app.parsers.facebookDate('not a publication date', now), null);
+});
+
+test('Facebook search focus state requires active input and caret at the end', () => {
+  const originalDocument = globalThis.document;
+  const input = {
+    value: 'Messi',
+    selectionStart: 5,
+    selectionEnd: 5,
+    isContentEditable: false,
+    getAttribute: () => null
+  };
+  globalThis.document = { activeElement: input };
+  try {
+    assert.deepEqual(app.scrapers.facebook.facebookSearchFocusState(input), {
+      active: true,
+      contenteditable: false,
+      caretConfirmed: true
+    });
+    input.selectionStart = 2;
+    input.selectionEnd = 2;
+    assert.equal(app.scrapers.facebook.facebookSearchFocusState(input).caretConfirmed, false);
+  } finally {
+    globalThis.document = originalDocument;
+  }
 });
 
 test('posts can retain a null publication date in the public payload', () => {
