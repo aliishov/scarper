@@ -226,6 +226,13 @@ test('TikTok URL produces a clean author and profile URL', () => {
   });
 });
 
+test('Instagram builds its direct keyword search URL without UI search', () => {
+  assert.equal(
+    app.parsers.instagramSearchUrl('Lionel Messi #10'),
+    'https://www.instagram.com/explore/search/keyword/?q=Lionel%20Messi%20%2310'
+  );
+});
+
 test('TikTok detail caption cleanup removes page chrome without sharing state', () => {
   assert.equal(app.parsers.tiktokCaption('Full caption #tag | TikTok', 'author'), 'Full caption #tag');
   assert.equal(app.parsers.tiktokCaption('12 Likes. TikTok video from User (@author): “Quoted caption #tag”.', 'author'), 'Quoted caption #tag');
