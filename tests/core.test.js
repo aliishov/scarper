@@ -105,6 +105,33 @@ test('Facebook container scoring rejects media wrappers and whole feeds', () => 
   assert.ok(feed < 0);
 });
 
+test('Facebook container selection requires author, timestamp, permalink, and content', () => {
+  const incompleteScore18 = {
+    hasAuthor: false, hasText: true, hasExpand: true, hasDateMeta: false,
+    hasPermalink: true, hasMedia: true, hasEngagement: false, tooLarge: false, isFeed: false
+  };
+  assert.equal(app.parsers.facebookContainerScore(incompleteScore18), 18);
+  assert.equal(app.parsers.facebookContainerComplete(incompleteScore18), false);
+  assert.equal(app.parsers.facebookContainerComplete({
+    ...incompleteScore18, hasAuthor: true, hasDateMeta: true
+  }), true);
+  assert.equal(app.parsers.facebookContainerComplete({
+    ...incompleteScore18, hasAuthor: true, hasDateMeta: true, hasText: false, hasMedia: false
+  }), false);
+});
+
+test('Facebook post URL normalization rejects search navigation links', () => {
+  assert.equal(app.scrapers.facebook.normalizePostUrl('https://www.facebook.com/search/videos'), '');
+  assert.equal(
+    app.scrapers.facebook.normalizePostUrl('https://www.facebook.com/photo/?fbid=123456789&id=123'),
+    'https://www.facebook.com/photo?fbid=123456789&id=123'
+  );
+  assert.equal(
+    app.scrapers.facebook.normalizePostUrl('https://www.facebook.com/example/posts/123456789?ref=search'),
+    'https://www.facebook.com/example/posts/123456789'
+  );
+});
+
 test('Facebook expand labels cover supported locales without matching UI text', () => {
   for (const label of ['See more', 'More', 'Read more', 'Show more', 'Ещё', 'Еще', 'Показать больше', 'Daha çox', 'Devamını gör']) {
     assert.equal(app.parsers.facebookExpandLabel(label), true, label);

@@ -44,9 +44,12 @@ const navigationSource = fs.readFileSync(path.join(root, 'core', 'navigation.js'
 assert.match(facebookSource, /parseFacebookDateFromHeaderHover/);
 assert.match(facebookSource, /findAndHoverFacebookDateElement/);
 assert.match(facebookSource, /findFacebookPostContainer/);
+assert.match(facebookSource, /isCompleteFacebookPostContainer/);
+assert.match(facebookSource, /Post rejected: missing author\/date after container retry/);
+assert.match(facebookSource, /profile \? this\.allVisible\('a\[role="link"\]\[href\]'/);
 assert.match(facebookSource, /Container candidate level=/);
 assert.match(facebookSource, /resolveDateFromPermalink/);
-assert.match(facebookSource, /postDate: postDate \? app\.utils\.formatTimestamp\(postDate\) : null/);
+assert.match(facebookSource, /postDate: app\.utils\.formatTimestamp\(postDate\)/);
 assert.match(facebookSource, /Date candidates outside header ignored/);
 assert.match(facebookSource, /Expand candidates found/);
 assert.match(facebookSource, /attempt <= 5/);
