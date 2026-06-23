@@ -45,6 +45,15 @@
     return score;
   }
 
+  function isCompleteFacebookPostContainer(signals) {
+    return !!signals
+      && !signals.isFeed
+      && signals.hasAuthor
+      && signals.hasDateMeta
+      && signals.hasPermalink
+      && (signals.hasText || signals.hasMedia);
+  }
+
   function hasTemporalEvidence(value) {
     const text = String(value || '').replace(/\u00a0/g, ' ').trim();
     if (!text || isMediaTooltipText(text)) return false;
@@ -479,11 +488,16 @@
 
     normalizePostUrl(rawUrl) {
       try {
-        const url = new URL(rawUrl, location.origin);
+        const url = new URL(rawUrl, globalThis.location?.origin || 'https://www.facebook.com');
         if (!/(^|\.)facebook\.com$/i.test(url.hostname)) return '';
-        const isPost = /\/(posts|permalink|photos|videos|reel)\//i.test(url.pathname) || /\/groups\/[^/]+\/posts\//i.test(url.pathname) || url.searchParams.has('story_fbid') || url.searchParams.has('fbid');
+        const pathname = url.pathname.replace(/\/{2,}/g, '/');
+        if (/^\/(search|watch|hashtag)(\/|$)/i.test(pathname) || /^\/groups\/(feed|discover)(\/|$)/i.test(pathname)) return '';
+        const isPost = /\/(posts|permalink|photos|videos|reel)\/[^/]+/i.test(pathname)
+          || /\/groups\/[^/]+\/posts\/[^/]+/i.test(pathname)
+          || (/^\/photo(?:\.php)?\/?$/i.test(pathname) && url.searchParams.has('fbid'))
+          || url.searchParams.has('story_fbid');
         if (!isPost) return '';
-        const canonical = new URL(`https://www.facebook.com${url.pathname.replace(/\/+$/, '')}`);
+        const canonical = new URL(`https://www.facebook.com${pathname.replace(/\/+$/, '')}`);
         for (const key of ['story_fbid', 'fbid', 'id']) if (url.searchParams.has(key)) canonical.searchParams.set(key, url.searchParams.get(key));
         return canonical.toString();
       } catch (error) { return ''; }
@@ -522,20 +536,12 @@
       const rect = element.getBoundingClientRect();
       const text = this.text(element);
       const postUrls = new Set(Array.from(element.querySelectorAll('a[href]')).map((link) => this.normalizePostUrl(link.href)).filter(Boolean));
-      const authorLinks = this.allVisible('h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', element).filter((link) => {
-        const value = this.text(link);
-        if (!value || value.length > 120 || this.normalizePostUrl(link.href) || hasTemporalEvidence(value)) return false;
-        try {
-          const url = new URL(link.href, location.origin);
-          return /(^|\.)facebook\.com$/i.test(url.hostname) && !/(^|\/)(photos?|videos?|reel|posts|permalink|comments?|reactions?|share)(\/|$)/i.test(url.pathname);
-        } catch (error) { return false; }
-      });
+      const profile = this.primaryFacebookProfileBlock(element);
+      const authorResult = profile ? this.extractFacebookAuthor(element) : null;
+      const header = this.facebookHeaderFromProfile(element, profile);
+      const timestampLink = authorResult?.author && authorResult.authorUrl ? this.facebookTimestampLink(element, header) : null;
       const hasExpand = this.allVisible('button, [role="button"], a, span, div, [tabindex]', element).some((node) => {
         return [node.getAttribute('aria-label'), this.text(node)].some(isFacebookExpandLabel);
-      });
-      const hasDateMeta = !!element.querySelector('time, [data-utime], abbr[title]') || this.allVisible('a, span, [aria-label]', element).some((node) => {
-        const value = node.getAttribute('aria-label') || node.getAttribute('title') || this.text(node);
-        return String(value || '').length <= 80 && hasTemporalEvidence(value);
       });
       const hasMedia = this.allVisible('img[src], video', element).some((node) => {
         const nodeRect = node.getBoundingClientRect();
@@ -548,10 +554,10 @@
       const nestedPostContainers = element.querySelectorAll('article, [role="article"], [data-pagelet*="FeedUnit"]').length;
       const isFeed = role === 'feed' || element === document.body || element === document.documentElement || nestedPostContainers > 2 || (rect.height > 5000 && postUrls.size > 5);
       const signals = {
-        hasAuthor: authorLinks.length > 0,
+        hasAuthor: !!authorResult?.author && !!authorResult.authorUrl,
         hasText: !!this.messageNode(element),
         hasExpand,
-        hasDateMeta,
+        hasDateMeta: !!timestampLink,
         hasPermalink: postUrls.size > 0,
         hasMedia,
         hasEngagement,
@@ -565,23 +571,24 @@
       const seed = seedElement?.nodeType === 3 ? seedElement.parentElement : seedElement;
       if (!seed) return { element: null, score: -Infinity, signals: null, trace: [] };
       const trace = [];
-      let best = null;
+      let bestIncomplete = null;
+      let selected = null;
       let current = seed.matches?.('a, img, video, span') ? seed.parentElement : seed;
       for (let level = 1; current && level <= 20; level++, current = current.parentElement) {
         if (!app.utils.isVisible(current)) continue;
         const signals = this.facebookContainerSignals(current);
         trace.push({ level, element: current, ...signals });
-        const hasContent = signals.hasText || signals.hasExpand || signals.hasMedia;
-        const hasIdentity = signals.hasAuthor || signals.hasDateMeta || signals.hasText;
-        const sufficient = !signals.isFeed && signals.hasPermalink && hasContent && hasIdentity && signals.score >= 11;
-        if (sufficient) {
-          best = { element: current, score: signals.score, signals, level };
+        if (isCompleteFacebookPostContainer(signals)) {
+          selected = { element: current, score: signals.score, signals, level, complete: true };
           break;
         }
-        if (!signals.isFeed && (!best || signals.score > best.score)) best = { element: current, score: signals.score, signals, level };
+        if (!signals.isFeed && (!bestIncomplete || signals.score > bestIncomplete.score)) {
+          bestIncomplete = { element: current, score: signals.score, signals, level, complete: false };
+        }
         if (signals.isFeed || current === document.body) break;
       }
-      return { ...(best || { element: seed, score: 0, signals: this.facebookContainerSignals(seed), level: 0 }), trace };
+      const fallback = bestIncomplete || { element: seed, score: 0, signals: this.facebookContainerSignals(seed), level: 0, complete: false };
+      return { ...(selected || fallback), trace };
     }
 
     async logFacebookContainerSelection(selection, ctx) {
@@ -594,6 +601,7 @@
       await ctx.logger.info('Facebook Selected container hasText', String(!!signals.hasText));
       await ctx.logger.info('Facebook Selected container hasExpand', String(!!signals.hasExpand));
       await ctx.logger.info('Facebook Selected container hasDateMeta', String(!!signals.hasDateMeta));
+      await ctx.logger.info('Facebook Selected container complete', String(!!selection.complete));
     }
 
     resolvePostContext(root) {
@@ -797,44 +805,29 @@
     }
 
     extractFacebookAuthor(postElement) {
-      const permalink = this.permalinkAnchors(postElement)[0]?.link || null;
-      const header = this.facebookHeaderMetaArea(postElement, permalink);
       const profile = this.primaryFacebookProfileBlock(postElement);
-      const postRect = postElement.getBoundingClientRect();
-      const topLimit = postRect.top + Math.min(300, Math.max(160, postRect.height * 0.35));
-      const tiers = [
-        { source: 'profile_name', priority: 300, links: profile ? this.allVisible('a[role="link"][href]', profile) : [] },
-        { source: 'h3 header', priority: 200, links: header ? this.allVisible('h3 a[role="link"][href], h4 a[role="link"][href]', header) : [] },
-        { source: 'top header', priority: 100, links: this.allVisible('h1 a[href], h2 a[href], h3 a[href], h4 a[href], strong a[href], a[role="link"][href]', header || postElement) }
-      ];
       const diagnostics = [];
       const candidates = [];
-      const seen = new Set();
-      for (const tier of tiers) for (const link of tier.links) {
-        if (seen.has(link)) continue;
-        seen.add(link);
+      for (const link of profile ? this.allVisible('a[role="link"][href]', profile) : []) {
         const author = this.text(link);
         let reason = '';
         if (!author || author.length > 120 || hasTemporalEvidence(author)) reason = 'action';
-        else if (link.closest('[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"]')) reason = 'body';
-        else if (this.normalizePostUrl(link.href) || link.querySelector('img, video') || link.closest('figure, [data-visualcompletion="media-vc-image"], [data-pagelet*="Media"]')) reason = 'media';
-        else if (link.closest('form, [role="comment"], [data-ad-rendering-role*="comment"], [data-ad-rendering-role*="reaction"], [data-ad-rendering-role*="share"]') || this.isFacebookUiText(author)) reason = 'comment/action';
-        const rect = link.getBoundingClientRect();
-        if (!reason && rect.top > topLimit) reason = 'link-preview';
+        else if (this.normalizePostUrl(link.href) || link.querySelector('img, video')) reason = 'media';
+        else if (this.isFacebookUiText(author)) reason = 'comment/action';
         try {
-          const url = new URL(link.href, location.origin);
+          const url = new URL(link.href, globalThis.location?.origin || 'https://www.facebook.com');
           if (!reason && !/(^|\.)facebook\.com$/i.test(url.hostname)) reason = 'external';
           if (!reason && (/(^|\/)(photos?|videos?|reel|posts|permalink|comments?|reactions?|share)(\/|$)/i.test(url.pathname) || url.searchParams.has('fbid') || url.searchParams.has('story_fbid'))) reason = 'media/comment/action';
           if (reason) {
-            diagnostics.push({ accepted: false, source: tier.source, value: author || link.href, reason });
+            diagnostics.push({ accepted: false, source: 'profile_name', value: author || link.href, reason });
             continue;
           }
           const heading = !!link.closest('h1, h2, h3, h4, strong');
-          const score = tier.priority + (header?.contains(link) ? 100 : 0) + (heading ? 80 : 0) + (link.getAttribute('role') === 'link' ? 20 : 0) - author.length / 10;
-          candidates.push({ author, authorUrl: link.href || url.toString(), element: link, score, source: tier.source });
-          diagnostics.push({ accepted: true, source: tier.source, value: author, reason: '' });
+          const score = (heading ? 80 : 0) - author.length / 10;
+          candidates.push({ author, authorUrl: link.href || url.toString(), element: link, score, source: 'profile_name' });
+          diagnostics.push({ accepted: true, source: 'profile_name', value: author, reason: '' });
         } catch (error) {
-          diagnostics.push({ accepted: false, source: tier.source, value: author || link.href, reason: 'external' });
+          diagnostics.push({ accepted: false, source: 'profile_name', value: author || link.href, reason: 'external' });
         }
       }
       candidates.sort((left, right) => right.score - left.score);
@@ -885,28 +878,33 @@
 
     facebookHeaderFromProfile(postElement, profileBlock = this.primaryFacebookProfileBlock(postElement)) {
       if (!profileBlock) return null;
-      const timestampSelector = 'a[aria-label][href*="/posts/"], a[aria-label][href*="story_fbid"], a[aria-label][href*="fbid="], a[role="link"][href*="/posts/"]';
+      const timestampSelector = 'a[aria-label][href], a[role="link"][href]';
       let fallback = profileBlock.parentElement;
       for (let current = profileBlock.parentElement, depth = 1; current && current !== postElement && depth <= 10; current = current.parentElement, depth++) {
         const rect = current.getBoundingClientRect();
         if (rect.height > 320) break;
         fallback = current;
-        if (current.querySelector(timestampSelector)) return current;
+        if (this.allVisible(timestampSelector, current).some((link) => {
+          const label = link.getAttribute('aria-label') || this.text(link);
+          return !!this.normalizePostUrl(link.href) && hasTemporalEvidence(label);
+        })) return current;
       }
       return fallback;
     }
 
     facebookTimestampLink(postElement, header = null) {
-      const selector = 'a[aria-label][href*="/posts/"], a[aria-label][href*="story_fbid"], a[aria-label][href*="fbid="], a[role="link"][href*="/posts/"]';
+      const selector = 'a[aria-label][href], a[role="link"][href]';
       const profile = this.primaryFacebookProfileBlock(postElement);
       const profileRect = profile?.getBoundingClientRect();
       const headerLinks = header ? this.allVisible(selector, header) : [];
       const links = headerLinks.length ? headerLinks : this.allVisible(selector, postElement);
       return links.filter((link) => {
+        if (!this.normalizePostUrl(link.href)) return false;
         if (this.rejectedDateElement(link, postElement)) return false;
         if (link.closest('[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"], figure, [data-visualcompletion="media-vc-image"]')) return false;
         const label = link.getAttribute('aria-label') || this.text(link);
         if (!label || label.length > 80 || isMediaTooltipText(label) || /(shared with|доступно всем|поделился|may be an image)/i.test(label)) return false;
+        if (!hasTemporalEvidence(label)) return false;
         if (!profileRect) return true;
         const rect = link.getBoundingClientRect();
         return Math.abs(rect.top - profileRect.bottom) <= 160 || Math.abs(rect.top - profileRect.top) <= 180;
@@ -932,7 +930,7 @@
       const labelDate = parseFacebookDate(label);
       const relative = /^(yesterday|вчера|\d+\s*(s|sec|m|min|h|hr|d|day|days|ч|час|д|дн|мин))/iu.test(label.replace(/\./g, ''));
       if (labelDate && relative) await ctx.logger.info('Facebook Relative date parsed', app.utils.formatTimestamp(labelDate));
-      if (labelDate && !relative) {
+      if (labelDate) {
         await ctx.logger.info('Facebook timestamp aria-label parsed', app.utils.formatTimestamp(labelDate));
         return labelDate;
       }
@@ -1245,7 +1243,8 @@
     }
 
     ancestorPostContainer(node) {
-      return this.findFacebookPostContainer(node).element || null;
+      const selection = this.findFacebookPostContainer(node);
+      return selection.complete ? selection.element : null;
     }
 
     discoverPostContainers() {
@@ -1304,9 +1303,9 @@
     }
 
     async parseArticle(article, ctx) {
-      const context = this.resolvePostContext(article);
-      const postElement = context.postElement || article;
-      const postUrl = context.postUrl;
+      let context = this.resolvePostContext(article);
+      let postElement = context.postElement || article;
+      let postUrl = context.postUrl;
       await this.logFacebookContainerSelection(context.selection, ctx);
       if (this.isAdvertisement(postElement)) return { advertisement: true };
       await ctx.logger.info('Facebook Post URL', postUrl || 'unavailable');
@@ -1315,6 +1314,39 @@
         await ctx.logger.warn('Facebook Post saved/skipped reason', 'skipped: post URL unavailable');
         return null;
       }
+
+      const parseIdentity = async () => {
+        const authorResult = this.extractFacebookAuthor(postElement);
+        for (const diagnostic of authorResult.diagnostics || []) {
+          if (diagnostic.source === 'profile_name') await ctx.logger.info('Facebook Author candidate from profile_name', diagnostic.value);
+          if (!diagnostic.accepted) await ctx.logger.warn('Facebook Author candidate rejected', `reason=${diagnostic.reason}, value=${diagnostic.value}`);
+        }
+        if (authorResult.author) await ctx.logger.info('Facebook Author accepted', `${authorResult.author} -> ${authorResult.authorUrl}`);
+        else await ctx.logger.warn('Facebook author was not found in profile_name', postUrl);
+        const postDate = await this.extractDate(postElement, ctx, postUrl);
+        return { authorResult, postDate };
+      };
+
+      let identity = context.selection.complete
+        ? await parseIdentity()
+        : { authorResult: { author: '', authorUrl: '', diagnostics: [] }, postDate: null };
+      if (!context.selection.complete || !identity.authorResult.author || !identity.authorResult.authorUrl || !identity.postDate) {
+        await ctx.logger.warn('Facebook container/identity incomplete; retrying from a higher DOM parent', `complete=${!!context.selection.complete}, author=${!!identity.authorResult.author}, authorUrl=${!!identity.authorResult.authorUrl}, date=${!!identity.postDate}`);
+        const retrySelection = this.findFacebookPostContainer(postElement.parentElement);
+        if (retrySelection.complete && retrySelection.element !== postElement) {
+          context = { ...context, selection: retrySelection, postElement: retrySelection.element };
+          postElement = retrySelection.element;
+          postUrl = this.postUrlForArticle(postElement) || postUrl;
+          await ctx.logger.info('Facebook container retry selected a higher parent', `level=${retrySelection.level}, score=${retrySelection.score}`);
+          await this.logFacebookContainerSelection(retrySelection, ctx);
+          identity = await parseIdentity();
+        }
+      }
+      if (!identity.authorResult.author || !identity.authorResult.authorUrl || !identity.postDate) {
+        await ctx.logger.warn('[facebook] Post rejected: missing author/date after container retry', `url=${postUrl}, author=${!!identity.authorResult.author}, authorUrl=${!!identity.authorResult.authorUrl}, date=${!!identity.postDate}`);
+        return null;
+      }
+
       await this.expandPostText(postElement, ctx);
       let textResult = this.extractPostText(postElement);
       if (!textResult.text) {
@@ -1325,29 +1357,11 @@
       if (textResult.text) await ctx.logger.info('Facebook post text extracted', `source=${textResult.source}, length=${textResult.text.length}`);
       else await ctx.logger.warn('Facebook post genuinely has no text; saving without synthetic text', postUrl);
 
-      const authorResult = this.extractFacebookAuthor(postElement);
-      for (const diagnostic of authorResult.diagnostics || []) {
-        if (diagnostic.source === 'profile_name') await ctx.logger.info('Facebook Author candidate from profile_name', diagnostic.value);
-        if (!diagnostic.accepted) await ctx.logger.warn('Facebook Author candidate rejected', `reason=${diagnostic.reason}, value=${diagnostic.value}`);
-      }
-      if (authorResult.author) await ctx.logger.info('Facebook Author accepted', `${authorResult.author} -> ${authorResult.authorUrl}`);
-      else await ctx.logger.warn('Facebook author was not found in header/meta area', postUrl);
-
-      const postDate = await this.extractDate(postElement, ctx, postUrl);
-      if (!postDate && ctx.state.dateLimit) {
-        await ctx.logger.warn('Facebook Post saved/skipped reason', 'skipped: date unavailable while date limit is enabled');
-        return null;
-      }
-      if (!postDate) await ctx.logger.warn('Facebook date unavailable; post will be saved with postDate=null because date limit is disabled', postUrl);
+      const { authorResult, postDate } = identity;
       const mediaUrls = this.extractFacebookMedia(postElement);
       await ctx.logger.info('Facebook media URLs extracted', String(mediaUrls.length));
-      const populatedFields = [authorResult.author, textResult.text, postDate, mediaUrls.length ? mediaUrls : null].filter(Boolean).length;
-      if (populatedFields < 2) {
-        await ctx.logger.warn('Facebook Post saved/skipped reason', `skipped: insufficient parsed fields (author=${!!authorResult.author}, text=${!!textResult.text}, date=${!!postDate}, media=${mediaUrls.length})`);
-        return null;
-      }
       return {
-        postDate: postDate ? app.utils.formatTimestamp(postDate) : null,
+        postDate: app.utils.formatTimestamp(postDate),
         postUrl,
         author: authorResult.author,
         authorUrl: authorResult.authorUrl,
@@ -1516,6 +1530,7 @@
   app.parsers.facebookDateText = looksLikeFacebookDate;
   app.parsers.facebookMediaTooltip = isMediaTooltipText;
   app.parsers.facebookContainerScore = scoreFacebookContainerSignals;
+  app.parsers.facebookContainerComplete = isCompleteFacebookPostContainer;
   app.parsers.facebookExpandLabel = isFacebookExpandLabel;
   app.scrapers.facebook = new FacebookScraper();
 })(globalThis.ScraperApp);
