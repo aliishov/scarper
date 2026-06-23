@@ -1,11 +1,14 @@
 (function initializeInstagramScraper(app) {
   'use strict';
 
+  function instagramSearchUrl(keyword) {
+    return `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(String(keyword || ''))}`;
+  }
+
   class InstagramScraper extends app.BaseScraper {
     constructor() {
       super('instagram');
       this.freshUiConfirmed = false;
-      this.searchOpenAttempt = 0;
     }
 
     async ensureReady(ctx) {
@@ -30,97 +33,33 @@
       } catch (error) { return ''; }
     }
 
-    searchInput() {
-      return this.visible('input[aria-label*="Search input" i], input[placeholder*="Search" i], input[aria-label*="Search" i], input[placeholder*="Поиск" i], input[aria-label*="Поиск" i], input[name="queryBox"], input[type="search"]');
-    }
-
-    async openSearch(ctx) {
-      this.searchOpenAttempt++;
-      const attempt = Math.min(this.searchOpenAttempt, 3);
-      let control = null;
-      let strategy = '';
-
-      if (attempt === 1) {
-        const searchSvg = this.allVisible('svg[aria-label], svg').find((svg) => {
-          const labels = [svg.getAttribute('aria-label'), svg.querySelector('title')?.textContent].map(app.utils.normalizeText).filter(Boolean);
-          return labels.some((label) => /^(search|поиск|axtarış|axtaris)$/.test(label));
-        });
-        if (searchSvg) {
-          await ctx.logger.info('Instagram Search icon found by svg aria-label/title');
-          control = searchSvg.closest('a, button, [role="button"], [role="link"]');
-          strategy = 'svg aria-label/title';
-        }
-      } else if (attempt === 2) {
-        control = this.allVisible('a[href="/explore/"], a[href^="/explore"]')
-          .find((link) => link.querySelector('svg') || /search|поиск|axtar/i.test(`${link.getAttribute('aria-label') || ''} ${this.text(link)}`));
-        strategy = 'explore link';
-      } else {
-        const rawControls = this.allVisible('a, button, [role="button"], [role="link"]');
-        control = rawControls.find((element) => {
-          const labels = [element.getAttribute('aria-label'), this.text(element)].map(app.utils.normalizeText).filter(Boolean);
-          return labels.some((label) => /^(search|поиск|axtarış|axtaris)$/.test(label));
-        });
-        strategy = 'visible navigation text';
-      }
-
-      if (!control) {
-        await ctx.logger.warn(`Instagram Search navigation control was not found by ${strategy || `attempt ${attempt}`}`);
+    resultsMatch(keyword) {
+      try {
+        const url = new URL(location.href);
+        return /^\/explore\/search\/keyword\/?$/i.test(url.pathname)
+          && this.normalizedKeyword(url.searchParams.get('q')) === this.normalizedKeyword(keyword);
+      } catch (error) {
         return false;
       }
-      const clickable = control.closest?.('a, button, [role="button"], [role="link"]') || control;
-      await ctx.logger.info(`Instagram Search clickable ancestor found: ${clickable.tagName}`, `href=${clickable.getAttribute('href') || 'none'}, strategy=${strategy}`);
-      const clicked = await ctx.navigation.click(clickable, 'Instagram Search navigation');
-      if (!clicked) return false;
-      await ctx.logger.info('Instagram waiting for search input');
-      const input = await app.utils.waitFor(() => this.searchInput(), { timeoutMs: 4500, intervalMs: 250, token: ctx.token });
-      if (input) await ctx.logger.info('Instagram search input found');
-      else await ctx.logger.warn(`Instagram search input did not appear after ${strategy}`);
-      return !!input;
-    }
-
-    async clickExactSuggestion(keyword, ctx) {
-      const expected = this.normalizedKeyword(keyword);
-      const exact = await app.utils.waitFor(() => {
-        const candidates = this.allVisible('a[href*="/explore/tags/"], a[href*="/explore/search/keyword/"], [role="option"] a[href]');
-        return candidates.find((link) => {
-          const fromUrl = this.urlKeyword(link.href);
-          const text = this.normalizedKeyword(this.text(link));
-          return fromUrl === expected || text === expected || text === `#${expected}`;
-        });
-      }, { timeoutMs: 4500, intervalMs: 250, token: ctx.token });
-      return exact ? ctx.navigation.click(exact, 'Instagram exact keyword result') : false;
-    }
-
-    resultsMatch(keyword) {
-      const expected = this.normalizedKeyword(keyword);
-      if (this.urlKeyword() === expected) return true;
-      const heading = this.allVisible('h1, h2, [role="heading"]').find((element) => this.normalizedKeyword(this.text(element)) === expected);
-      return !!heading && document.querySelectorAll('a[href^="/p/"], a[href^="/reel/"]').length > 0;
     }
 
     async search(keyword, ctx) {
-      this.searchOpenAttempt = 0;
-      await ctx.logger.info(`Instagram search started: ${keyword}`);
-      await ctx.logger.info(`Instagram search input visible before opening UI: ${!!this.searchInput()}`);
+      const searchUrl = instagramSearchUrl(keyword);
+      await ctx.logger.info('Instagram uses direct search URL strategy');
       if (!this.resultsMatch(keyword)) {
-        const result = await ctx.navigation.search({
-          platform: 'Instagram',
-          keyword,
-          findInput: () => this.searchInput(),
-          openSearch: () => this.openSearch(ctx),
-          verify: () => this.resultsMatch(keyword),
-          clickSuggestion: () => this.clickExactSuggestion(keyword, ctx),
-          clickSearchButton: async (input) => {
-            const button = input.closest('form')?.querySelector('button[type="submit"]');
-            return button ? ctx.navigation.click(button, 'Instagram search button') : false;
-          },
-          fallbackUrl: () => `https://www.instagram.com/explore/search/keyword/?q=${encodeURIComponent(keyword)}`
-        });
-        if (result.navigating) return result;
-      } else {
-        await ctx.logger.info('Existing Instagram results match keyword');
+        await ctx.logger.info('Opening Instagram search URL', searchUrl);
+        await ctx.logger.info('Waiting for Instagram search results');
+        window.location.assign(searchUrl);
+        return { success: false, navigating: true };
       }
-      await ctx.logger.info(`Instagram results confirmed for keyword: ${keyword}`);
+      await ctx.logger.info('Waiting for Instagram search results');
+      const confirmed = await app.utils.waitFor(() => this.resultsMatch(keyword), {
+        timeoutMs: 15000,
+        intervalMs: 300,
+        token: ctx.token
+      });
+      if (!confirmed) throw new Error(`Instagram search results were not confirmed for keyword: ${keyword}`);
+      await ctx.logger.info('Instagram search results confirmed', keyword);
       await this.tryFreshUi(ctx);
       return { success: true };
     }
@@ -404,5 +343,6 @@
     }
   }
 
+  app.parsers.instagramSearchUrl = instagramSearchUrl;
   app.scrapers.instagram = new InstagramScraper();
 })(globalThis.ScraperApp);
