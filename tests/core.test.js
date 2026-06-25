@@ -233,6 +233,28 @@ test('Instagram builds its direct keyword search URL without UI search', () => {
   );
 });
 
+test('Twitter date limit builds Advanced Search fallback query', () => {
+  assert.deepEqual(app.parsers.twitterDateLimit('13/04/2026'), {
+    iso: '2026-04-13',
+    year: '2026',
+    month: '4',
+    monthName: 'April',
+    day: '13'
+  });
+  assert.deepEqual(app.parsers.twitterDateLimit('2026-04-13'), {
+    iso: '2026-04-13',
+    year: '2026',
+    month: '4',
+    monthName: 'April',
+    day: '13'
+  });
+  assert.equal(app.parsers.twitterDateLimit('31/02/2026'), null);
+  assert.equal(
+    app.parsers.twitterSinceSearchUrl('mehkeme', '13/04/2026'),
+    'https://x.com/search?f=live&q=mehkeme%20since%3A2026-04-13&src=typed_query'
+  );
+});
+
 test('TikTok detail caption cleanup removes page chrome without sharing state', () => {
   assert.equal(app.parsers.tiktokCaption('Full caption #tag | TikTok', 'author'), 'Full caption #tag');
   assert.equal(app.parsers.tiktokCaption('12 Likes. TikTok video from User (@author): “Quoted caption #tag”.', 'author'), 'Quoted caption #tag');

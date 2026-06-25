@@ -41,6 +41,14 @@ assert.doesNotMatch(instagramSource, /searchInput\(|openSearch\(|clickExactSugge
 assert.match(instagramSource, /collectCarouselMedia/);
 assert.match(instagramSource, /source\[src\]/);
 assert.match(instagramSource, /Instagram carousel slide changed/);
+const twitterSource = fs.readFileSync(path.join(root, 'scrapers', 'twitter.js'), 'utf8');
+assert.match(twitterSource, /Date limit enabled; opening Advanced Search/);
+assert.match(twitterSource, /Advanced search link found/);
+assert.match(twitterSource, /input\[name="allOfTheseWords"\]/);
+assert.match(twitterSource, /From date selected: \$\{dateLimit\.iso\}/);
+assert.match(twitterSource, /Advanced search UI failed; using since: fallback URL/);
+assert.match(twitterSource, /since:\$\{parsed\.iso\}/);
+assert.match(twitterSource, /encodeURIComponent\(q\)/);
 const facebookSource = fs.readFileSync(path.join(root, 'scrapers', 'facebook.js'), 'utf8');
 const navigationSource = fs.readFileSync(path.join(root, 'core', 'navigation.js'), 'utf8');
 assert.match(facebookSource, /parseFacebookDateFromHeaderHover/);
