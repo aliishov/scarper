@@ -21,6 +21,19 @@
       sendResponse({ success: true });
       return false;
     }
+    if (request.action === 'news:extractArticle') {
+      void (async () => {
+        try {
+          const scraper = app.scrapers[request.source];
+          if (!scraper?.extractArticleFromPage) throw new Error(`Article extractor is not available for ${request.source}`);
+          const article = await scraper.extractArticleFromPage(request.preview || {});
+          sendResponse({ success: true, article });
+        } catch (error) {
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
+      return true;
+    }
     return false;
   });
 })(globalThis.ScraperApp);

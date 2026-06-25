@@ -6,7 +6,11 @@
   ]);
 
   function publicPost(post) {
-    return Object.fromEntries(POST_FIELDS.map((field) => [field, post[field]]));
+    const payload = Object.fromEntries(POST_FIELDS.map((field) => [field, post[field]]));
+    for (const optionalField of ['title', 'category']) {
+      if (post[optionalField]) payload[optionalField] = post[optionalField];
+    }
+    return payload;
   }
 
   app.server = Object.freeze({

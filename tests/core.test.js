@@ -32,7 +32,8 @@ for (const file of [
   'scrapers/twitter.js',
   'scrapers/facebook.js',
   'scrapers/instagram.js',
-  'scrapers/tiktok.js'
+  'scrapers/tiktok.js',
+  'scrapers/oxu.js'
 ]) {
   require(path.join(root, file));
 }
@@ -57,6 +58,7 @@ test('date mask inserts slashes and calendar values use DD/MM/YYYY', () => {
 
 test('result filename follows source_result_DD_MM_YYYY.jsonl', () => {
   assert.equal(app.utils.buildFilename('facebook', new Date(2026, 5, 20)), 'facebook_result_20_06_2026.jsonl');
+  assert.equal(app.utils.buildFilename('oxu.az', new Date(2026, 5, 25)), 'oxu.az_result_25_06_2026.jsonl');
 });
 
 test('Facebook parses absolute tooltip date without replacing it with now', () => {
@@ -255,6 +257,38 @@ test('Twitter date limit builds Advanced Search fallback query', () => {
   );
 });
 
+test('Oxu.az parses relative Azerbaijani publication dates', () => {
+  const now = new Date(2026, 5, 25, 13, 30, 0);
+  const today = app.parsers.oxuDate('Bu g\u00fcn / 12:02', now);
+  assert.equal(today.getFullYear(), 2026);
+  assert.equal(today.getMonth(), 5);
+  assert.equal(today.getDate(), 25);
+  assert.equal(today.getHours(), 12);
+  assert.equal(today.getMinutes(), 2);
+  const yesterday = app.parsers.oxuDate('D\u00fcn\u0259n / 22:12', now);
+  assert.equal(yesterday.getDate(), 24);
+  assert.equal(yesterday.getHours(), 22);
+  assert.equal(yesterday.getMinutes(), 12);
+  assert.equal(app.parsers.oxuDate('31/02/2026 / 12:00', now), null);
+});
+
+test('Oxu.az payload keeps title and category while social payload stays unchanged', () => {
+  const normalized = app.utils.normalizePost({
+    postDate: '2026-06-25T12:02:00+04:00',
+    postUrl: 'https://oxu.az/cemiyyet/example',
+    author: 'oxu.az',
+    authorUrl: 'https://oxu.az/',
+    title: 'Example title',
+    text: 'Article body',
+    category: 'C\u0259miyy\u0259t',
+    mediaUrls: []
+  }, { keyword: 'test', source: 'oxu.az' });
+  const payload = app.server.toPayload(normalized);
+  assert.equal(payload.title, 'Example title');
+  assert.equal(payload.category, 'C\u0259miyy\u0259t');
+  assert.equal(app.utils.canonicalPostKey(normalized), 'oxu.az:https://oxu.az/cemiyyet/example');
+});
+
 test('TikTok detail caption cleanup removes page chrome without sharing state', () => {
   assert.equal(app.parsers.tiktokCaption('Full caption #tag | TikTok', 'author'), 'Full caption #tag');
   assert.equal(app.parsers.tiktokCaption('12 Likes. TikTok video from User (@author): “Quoted caption #tag”.', 'author'), 'Quoted caption #tag');
@@ -317,7 +351,7 @@ test('all platform scrapers implement the shared public contract', () => {
     'ensureReady', 'searchKeyword', 'scrapePosts', 'parsePost', 'expandPostText',
     'parsePostDate', 'shouldSkipPost', 'stop', 'cleanup'
   ];
-  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok']) {
+  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'oxu.az']) {
     for (const method of methods) {
       assert.equal(typeof app.scrapers[platform][method], 'function', `${platform}.${method} must exist`);
     }

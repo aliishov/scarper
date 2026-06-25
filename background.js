@@ -48,6 +48,104 @@ async function sendToOwner(state, action) {
   }
 }
 
+function createTab(details) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.create(details, (tab) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(tab);
+    });
+  });
+}
+
+function getTab(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.get(tabId, (tab) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(tab);
+    });
+  });
+}
+
+function removeTab(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.remove(tabId, () => resolve());
+  });
+}
+
+function sendTabMessage(tabId, message) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(response);
+    });
+  });
+}
+
+async function assertRunCanContinue(runId) {
+  const state = await stateRepository.get();
+  if (!state || state.runId !== runId || !state.active) throw new Error('Run stopped while article tab was open');
+  if (state.requestedAction === 'stop' || state.requestedAction === 'skip') {
+    throw new Error(`Run control requested: ${state.requestedAction}`);
+  }
+  return state;
+}
+
+async function waitForTabComplete(runId, tabId, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await assertRunCanContinue(runId);
+    const tab = await getTab(tabId);
+    if (tab.status === 'complete') return tab;
+    await app.utils.sleep(250);
+  }
+  throw new Error('Article tab did not finish loading');
+}
+
+async function sendArticleExtractMessage(runId, tabId, source, preview) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 12; attempt++) {
+    await assertRunCanContinue(runId);
+    try {
+      const response = await sendTabMessage(tabId, { action: 'news:extractArticle', source, preview });
+      if (!response?.success) throw new Error(response?.error || 'Article extractor failed');
+      return response.article;
+    } catch (error) {
+      lastError = error;
+      await app.utils.sleep(350);
+    }
+  }
+  throw lastError || new Error('Article extractor did not respond');
+}
+
+async function openNewsArticleTab(request, sender) {
+  const state = await assertRunCanContinue(request.runId);
+  if (state.ownerTabId !== sender.tab?.id) throw new Error('Article tab request came from a non-owner tab');
+  let tab = null;
+  await appendLog(request.runId, 'info', `[${request.source}] Opening article in new tab: ${request.url}`);
+  try {
+    tab = await createTab({
+      url: request.url,
+      active: false,
+      openerTabId: sender.tab.id,
+      windowId: sender.tab.windowId
+    });
+    await waitForTabComplete(request.runId, tab.id);
+    await appendLog(request.runId, 'info', `[${request.source}] Article loaded`, request.url);
+    const article = await sendArticleExtractMessage(request.runId, tab.id, request.source, request.preview || {});
+    await appendLog(request.runId, 'info', `[${request.source}] Article scraped`, request.url);
+    return { success: true, article };
+  } finally {
+    if (tab?.id) {
+      await appendLog(request.runId, 'info', `[${request.source}] Closing article tab`, request.url);
+      await removeTab(tab.id);
+      await appendLog(request.runId, 'info', `[${request.source}] Article tab closed`, request.url);
+    }
+  }
+}
+
 async function finalizeRun(runId, stopped) {
   if (finalizingRuns.has(runId)) return finalizingRuns.get(runId);
   const promise = (async () => {
@@ -126,6 +224,9 @@ async function handleMessage(request, sender) {
     case 'result:add': {
       const result = await exclusive(() => serverQueue.savePost(request.runId, request.post, request.options));
       return { success: true, ...result };
+    }
+    case 'news:openArticleTab': {
+      return openNewsArticleTab(request, sender);
     }
     case 'run:skip': {
       const state = await exclusive(() => stateRepository.patch(request.runId, { requestedAction: 'skip' }));

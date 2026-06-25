@@ -148,7 +148,7 @@
 
   function buildFilename(source, now = new Date()) {
     const pad = (number) => String(number).padStart(2, '0');
-    const safeSource = String(source || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'unknown';
+    const safeSource = String(source || 'unknown').toLowerCase().replace(/[^a-z0-9_.-]/g, '') || 'unknown';
     return `${safeSource}_result_${pad(now.getDate())}_${pad(now.getMonth() + 1)}_${now.getFullYear()}.jsonl`;
   }
 
@@ -196,6 +196,9 @@
       text: rawPost.text === null ? null : String(rawPost.text || '').trim(),
       mediaUrls: Array.from(new Set((rawPost.mediaUrls || []).filter(Boolean)))
     };
+    for (const optionalField of ['title', 'category']) {
+      if (optionalField in rawPost) post[optionalField] = String(rawPost[optionalField] || '').trim();
+    }
     post.key = canonicalPostKey(post);
     return post;
   }

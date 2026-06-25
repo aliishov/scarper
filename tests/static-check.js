@@ -10,7 +10,10 @@ const scripts = manifest.content_scripts[0].js;
 for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok']) {
   assert.ok(scripts.includes(`scrapers/${platform}.js`), `${platform} scraper must be a separate content module`);
 }
+assert.ok(scripts.includes('scrapers/oxu.js'), 'oxu.az scraper must be a separate content module');
 assert.equal(scripts.at(-1), 'content.js');
+assert.ok(manifest.host_permissions.includes('*://oxu.az/*'), 'oxu.az host permission is required');
+assert.ok(manifest.content_scripts[0].matches.includes('*://oxu.az/*'), 'oxu.az content script match is required');
 
 const sourceFiles = [];
 function walk(directory) {
@@ -49,6 +52,21 @@ assert.match(twitterSource, /From date selected: \$\{dateLimit\.iso\}/);
 assert.match(twitterSource, /Advanced search UI failed; using since: fallback URL/);
 assert.match(twitterSource, /since:\$\{parsed\.iso\}/);
 assert.match(twitterSource, /encodeURIComponent\(q\)/);
+const oxuSource = fs.readFileSync(path.join(root, 'scrapers', 'oxu.js'), 'utf8');
+assert.match(oxuSource, /source: 'oxu\.az'/);
+assert.match(oxuSource, /\.custom-navbar-search-toggle/);
+assert.match(oxuSource, /input\[name="query"\]/);
+assert.match(oxuSource, /\.rt-news-item/);
+assert.match(oxuSource, /news:openArticleTab/);
+assert.match(oxuSource, /post-detail-content-inner\.resize-area > p/);
+assert.match(oxuSource, /audio-block\[data-url\]/);
+assert.match(oxuSource, /app\.parsers\.oxuDate/);
+const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
+const contentSource = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+assert.match(backgroundSource, /news:openArticleTab/);
+assert.match(backgroundSource, /chrome\.tabs\.create/);
+assert.match(backgroundSource, /chrome\.tabs\.remove/);
+assert.match(contentSource, /news:extractArticle/);
 const facebookSource = fs.readFileSync(path.join(root, 'scrapers', 'facebook.js'), 'utf8');
 const navigationSource = fs.readFileSync(path.join(root, 'core', 'navigation.js'), 'utf8');
 assert.match(facebookSource, /parseFacebookDateFromHeaderHover/);

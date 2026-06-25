@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Multi-platform scraper",
   "version": "2.0.0",
-  "description": "Collects posts from X, Facebook, Instagram, and TikTok",
+  "description": "Collects posts from X, Facebook, Instagram, TikTok, and news sites",
   "permissions": [
     "activeTab",
     "downloads",
@@ -20,6 +20,8 @@
     "*://instagram.com/*",
     "*://www.tiktok.com/*",
     "*://tiktok.com/*",
+    "*://oxu.az/*",
+    "*://www.oxu.az/*",
     "http://localhost/*"
   ],
   "background": {
@@ -41,7 +43,9 @@
         "*://www.instagram.com/*",
         "*://instagram.com/*",
         "*://www.tiktok.com/*",
-        "*://tiktok.com/*"
+        "*://tiktok.com/*",
+        "*://oxu.az/*",
+        "*://www.oxu.az/*"
       ],
       "js": [
         "core/namespace.js",
@@ -56,6 +60,7 @@
         "scrapers/facebook.js",
         "scrapers/instagram.js",
         "scrapers/tiktok.js",
+        "scrapers/oxu.js",
         "core/state-machine.js",
         "content.js"
       ],
