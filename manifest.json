@@ -22,6 +22,8 @@
     "*://tiktok.com/*",
     "*://oxu.az/*",
     "*://www.oxu.az/*",
+    "*://media.az/*",
+    "*://www.media.az/*",
     "http://localhost/*"
   ],
   "background": {
@@ -45,7 +47,9 @@
         "*://www.tiktok.com/*",
         "*://tiktok.com/*",
         "*://oxu.az/*",
-        "*://www.oxu.az/*"
+        "*://www.oxu.az/*",
+        "*://media.az/*",
+        "*://www.media.az/*"
       ],
       "js": [
         "core/namespace.js",
@@ -61,6 +65,7 @@
         "scrapers/instagram.js",
         "scrapers/tiktok.js",
         "scrapers/oxu.js",
+        "scrapers/media.js",
         "core/state-machine.js",
         "content.js"
       ],

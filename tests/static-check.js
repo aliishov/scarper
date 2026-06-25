@@ -11,9 +11,12 @@ for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok']) {
   assert.ok(scripts.includes(`scrapers/${platform}.js`), `${platform} scraper must be a separate content module`);
 }
 assert.ok(scripts.includes('scrapers/oxu.js'), 'oxu.az scraper must be a separate content module');
+assert.ok(scripts.includes('scrapers/media.js'), 'media.az scraper must be a separate content module');
 assert.equal(scripts.at(-1), 'content.js');
 assert.ok(manifest.host_permissions.includes('*://oxu.az/*'), 'oxu.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://oxu.az/*'), 'oxu.az content script match is required');
+assert.ok(manifest.host_permissions.includes('*://media.az/*'), 'media.az host permission is required');
+assert.ok(manifest.content_scripts[0].matches.includes('*://media.az/*'), 'media.az content script match is required');
 
 const sourceFiles = [];
 function walk(directory) {
@@ -61,6 +64,26 @@ assert.match(oxuSource, /news:openArticleTab/);
 assert.match(oxuSource, /post-detail-content-inner\.resize-area > p/);
 assert.match(oxuSource, /audio-block\[data-url\]/);
 assert.match(oxuSource, /app\.parsers\.oxuDate/);
+assert.doesNotMatch(oxuSource, /category:/);
+assert.doesNotMatch(oxuSource, /post-item-category|breadcrumb-item\.active/);
+const mediaSource = fs.readFileSync(path.join(root, 'scrapers', 'media.js'), 'utf8');
+assert.match(mediaSource, /source: 'media\.az'/);
+assert.match(mediaSource, /header__search-open/);
+assert.match(mediaSource, /input\.header__search__input\[name="query"\]/);
+assert.match(mediaSource, /\.post-block/);
+assert.match(mediaSource, /news:openArticleTab/);
+assert.match(mediaSource, /news-inner__desc p/);
+assert.match(mediaSource, /news-inner__image img/);
+assert.match(mediaSource, /video\[src\], source\[src\], audio\[src\]/);
+assert.match(mediaSource, /app\.parsers\.mediaAzDate/);
+assert.match(mediaSource, /input\[name="date_start"\], #start_date/);
+assert.match(mediaSource, /Setting date_start input/);
+assert.match(mediaSource, /Search submitted with date_start/);
+assert.match(mediaSource, /Using fallback URL with date_start/);
+assert.match(mediaSource, /date_start=\$\{parsed\.iso\}&date_end=&category=&sort_type=0/);
+assert.match(mediaSource, /app\.parsers\.mediaAzDateLimit/);
+assert.match(mediaSource, /app\.parsers\.mediaAzSearchUrl/);
+assert.doesNotMatch(mediaSource, /category:/);
 const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 const contentSource = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
 assert.match(backgroundSource, /news:openArticleTab/);

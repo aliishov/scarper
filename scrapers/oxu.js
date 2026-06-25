@@ -208,8 +208,7 @@
         postUrl,
         title: this.text(titleLink) || this.text(element.querySelector('.post-item-title')) || '',
         previewImage: this.imageUrl(image),
-        rawDate,
-        category: this.text(element.querySelector('.post-item-category')) || ''
+        rawDate
       };
     }
 
@@ -285,7 +284,6 @@
         authorUrl: SOURCE_CONFIG.authorUrl,
         title: article.title || candidate.title,
         text: article.text || '',
-        category: article.category || candidate.category,
         mediaUrls,
         postDate: parsedDate ? app.utils.formatTimestamp(parsedDate) : null,
         scrapedAt: new Date().toISOString()
@@ -351,10 +349,6 @@
       const rawDate = this.text(root.querySelector('.post-detail-meta span:first-child')) || preview.rawDate || '';
       const parsedDate = parseOxuDate(rawDate);
       const text = this.articleText(root);
-      const category = this.text(root.querySelector('.breadcrumb-item.active a span'))
-        || this.text(root.querySelector('.breadcrumb-item.active'))
-        || preview.category
-        || '';
       return {
         source: SOURCE_CONFIG.source,
         postUrl: normalizeOxuUrl(location.href) || preview.postUrl || '',
@@ -362,7 +356,6 @@
         authorUrl: SOURCE_CONFIG.authorUrl,
         title,
         text,
-        category,
         rawDate,
         postDate: parsedDate ? app.utils.formatTimestamp(parsedDate) : null,
         mediaUrls: this.articleMedia(root),

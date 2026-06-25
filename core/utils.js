@@ -196,7 +196,7 @@
       text: rawPost.text === null ? null : String(rawPost.text || '').trim(),
       mediaUrls: Array.from(new Set((rawPost.mediaUrls || []).filter(Boolean)))
     };
-    for (const optionalField of ['title', 'category']) {
+    for (const optionalField of ['title']) {
       if (optionalField in rawPost) post[optionalField] = String(rawPost[optionalField] || '').trim();
     }
     post.key = canonicalPostKey(post);
