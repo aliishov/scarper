@@ -8,6 +8,10 @@
     authorUrl: 'https://media.az/'
   });
 
+  function pad(number) {
+    return String(number).padStart(2, '0');
+  }
+
   function unique(values) {
     return Array.from(new Set(values.filter(Boolean)));
   }
@@ -55,6 +59,38 @@
     return date ? app.utils.formatTimestamp(date) : null;
   }
 
+  function parseMediaAzDateLimit(value) {
+    const text = String(value || '').trim();
+    if (!text) return null;
+    let year;
+    let month;
+    let day;
+    let match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      year = Number(match[1]);
+      month = Number(match[2]);
+      day = Number(match[3]);
+    } else {
+      match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (!match) return null;
+      day = Number(match[1]);
+      month = Number(match[2]);
+      year = Number(match[3]);
+    }
+    if (!validDateParts(year, month - 1, day, 0, 0, 0)) return null;
+    return {
+      display: `${pad(day)}/${pad(month)}/${year}`,
+      iso: `${year}-${pad(month)}-${pad(day)}`
+    };
+  }
+
+  function mediaAzSearchUrl(keyword, dateLimit = null) {
+    const parsed = typeof dateLimit === 'string' ? parseMediaAzDateLimit(dateLimit) : dateLimit;
+    const base = `${SOURCE_CONFIG.baseUrl}search?query=${encodeURIComponent(String(keyword || ''))}`;
+    if (!parsed) return base;
+    return `${base}&date_start=${parsed.iso}&date_end=&category=&sort_type=0`;
+  }
+
   function normalizeMediaAzUrl(value) {
     try {
       const url = new URL(value || '', SOURCE_CONFIG.baseUrl);
@@ -81,8 +117,13 @@
       try { return app.utils.normalizeText(new URL(location.href).searchParams.get('query')); } catch (error) { return ''; }
     }
 
-    resultsMatch(keyword) {
-      return /^\/search\/?$/i.test(location.pathname) && this.currentQuery() === app.utils.normalizeText(keyword);
+    currentDateStart() {
+      try { return String(new URL(location.href).searchParams.get('date_start') || ''); } catch (error) { return ''; }
+    }
+
+    resultsMatch(keyword, dateLimit = null) {
+      if (!(/^\/search\/?$/i.test(location.pathname) && this.currentQuery() === app.utils.normalizeText(keyword))) return false;
+      return !dateLimit || this.currentDateStart() === dateLimit.iso;
     }
 
     searchButton() {
@@ -97,20 +138,88 @@
       return input?.closest('form')?.querySelector('button.header__search__btn[type="submit"], button[type="submit"], button') || null;
     }
 
-    searchUrl(keyword) {
-      return `${SOURCE_CONFIG.baseUrl}search?query=${encodeURIComponent(String(keyword || ''))}`;
+    searchUrl(keyword, dateLimit = null) {
+      return mediaAzSearchUrl(keyword, dateLimit);
+    }
+
+    dateStartInput() {
+      return this.visible('input[name="date_start"], #start_date');
+    }
+
+    setNativeInputValue(input, value) {
+      const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+      if (setter) setter.call(input, value);
+      else input.value = value;
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertReplacementText', data: value }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    async submitSearchForm(form, keyword, ctx) {
+      const queryInput = form?.querySelector('input[name="query"]') || this.searchInput();
+      if (queryInput && app.utils.normalizeText(queryInput.value) !== app.utils.normalizeText(keyword)) {
+        this.setNativeInputValue(queryInput, keyword);
+      }
+      const submit = form?.querySelector('button[type="submit"], button.header__search__btn, button');
+      if (submit && app.utils.isVisible(submit)) {
+        await ctx.navigation.click(submit, 'Media.az search submit');
+        return true;
+      }
+      if (form) {
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        return true;
+      }
+      return false;
+    }
+
+    async applyDateLimitSearch(keyword, dateLimit, ctx) {
+      const input = await app.utils.waitFor(() => this.dateStartInput(), {
+        timeoutMs: 5000,
+        intervalMs: 250,
+        token: ctx.token
+      });
+      if (input) {
+        await ctx.logger.info(`[media.az] Setting date_start input: ${dateLimit.iso}`);
+        this.setNativeInputValue(input, dateLimit.iso);
+        const form = input.closest('form') || this.searchInput()?.closest('form') || document.querySelector('form[action*="/search"], form[action*="search"]');
+        const submitted = await this.submitSearchForm(form, keyword, ctx);
+        if (submitted) {
+          await ctx.logger.info('[media.az] Search submitted with date_start');
+          const confirmed = await app.utils.waitFor(() => this.resultsMatch(keyword, dateLimit), {
+            timeoutMs: 8000,
+            intervalMs: 300,
+            token: ctx.token
+          });
+          if (confirmed) {
+            await ctx.logger.info('[media.az] Search results loaded');
+            return { success: true };
+          }
+        }
+      }
+
+      const fallbackUrl = this.searchUrl(keyword, dateLimit);
+      await ctx.logger.warn('[media.az] Using fallback URL with date_start', fallbackUrl);
+      window.location.assign(fallbackUrl);
+      return { success: false, navigating: true, fallback: true };
     }
 
     async search(keyword, ctx) {
       await ctx.logger.info(`[media.az] Keyword started: ${keyword}`);
+      const dateLimit = parseMediaAzDateLimit(ctx.state?.dateLimit);
+      if (dateLimit) {
+        await ctx.logger.info('[media.az] Date limit enabled');
+        await ctx.logger.info(`[media.az] Converted date limit: ${dateLimit.display} -> ${dateLimit.iso}`);
+      }
       if (!/(^|\.)media\.az$/i.test(location.hostname)) {
         window.location.assign(SOURCE_CONFIG.baseUrl);
         return { success: false, navigating: true };
       }
-      if (this.resultsMatch(keyword)) {
+      if (this.resultsMatch(keyword, dateLimit)) {
         await ctx.logger.info('[media.az] Search results loaded');
         return { success: true };
       }
+      if (dateLimit && this.resultsMatch(keyword)) return this.applyDateLimitSearch(keyword, dateLimit, ctx);
 
       let submitted = false;
       const button = this.searchButton();
@@ -150,11 +259,12 @@
       if (submitted || this.resultsMatch(keyword)) {
         await ctx.logger.info('[media.az] Search submitted');
         await ctx.logger.info('[media.az] Search results loaded');
+        if (dateLimit) return this.applyDateLimitSearch(keyword, dateLimit, ctx);
         return { success: true };
       }
 
-      const fallbackUrl = this.searchUrl(keyword);
-      await ctx.logger.warn('[media.az] UI search failed; using fallback URL', fallbackUrl);
+      const fallbackUrl = this.searchUrl(keyword, dateLimit);
+      await ctx.logger.warn(dateLimit ? '[media.az] Using fallback URL with date_start' : '[media.az] UI search failed; using fallback URL', fallbackUrl);
       window.location.assign(fallbackUrl);
       return { success: false, navigating: true };
     }
@@ -354,6 +464,8 @@
 
   app.parsers = app.parsers || {};
   app.parsers.mediaAzDate = parseMediaAzDate;
+  app.parsers.mediaAzDateLimit = parseMediaAzDateLimit;
+  app.parsers.mediaAzSearchUrl = mediaAzSearchUrl;
   app.parsers.mediaAzUrl = normalizeMediaAzUrl;
   app.parsers.mediaAzSourceConfig = SOURCE_CONFIG;
   app.scrapers[SOURCE_CONFIG.source] = new MediaAzScraper();

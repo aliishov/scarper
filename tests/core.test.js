@@ -286,6 +286,22 @@ test('Media.az parses absolute publication dates in local timezone', () => {
   assert.equal(app.parsers.mediaAzDate('31.02.2026 12:00'), null);
 });
 
+test('Media.az date limit search URL includes date_start filters', () => {
+  assert.deepEqual(app.parsers.mediaAzDateLimit('02/07/2026'), {
+    display: '02/07/2026',
+    iso: '2026-07-02'
+  });
+  assert.deepEqual(app.parsers.mediaAzDateLimit('2026-07-02'), {
+    display: '02/07/2026',
+    iso: '2026-07-02'
+  });
+  assert.equal(app.parsers.mediaAzDateLimit('31/02/2026'), null);
+  assert.equal(
+    app.parsers.mediaAzSearchUrl('\u0421\u0443\u0434', '02/07/2026'),
+    'https://media.az/search?query=%D0%A1%D1%83%D0%B4&date_start=2026-07-02&date_end=&category=&sort_type=0'
+  );
+});
+
 test('News payload keeps title and never exposes category', () => {
   const normalized = app.utils.normalizePost({
     postDate: '2026-06-25T12:02:00+04:00',
