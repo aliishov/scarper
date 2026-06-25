@@ -90,6 +90,7 @@
     if (platform === 'instagram') return { domain: 'instagram.com', url: 'https://www.instagram.com/' };
     if (platform === 'tiktok') return { domain: 'tiktok.com', url: 'https://www.tiktok.com/' };
     if (platform === 'oxu.az') return { domain: 'oxu.az', url: 'https://oxu.az/' };
+    if (platform === 'media.az') return { domain: 'media.az', url: 'https://media.az/' };
     return { domain: 'x.com', url: 'https://x.com/explore' };
   }
 

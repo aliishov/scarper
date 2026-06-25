@@ -1,85 +1,64 @@
-(function initializeOxuScraper(app) {
+(function initializeMediaAzScraper(app) {
   'use strict';
 
   const SOURCE_CONFIG = Object.freeze({
-    source: 'oxu.az',
-    baseUrl: 'https://oxu.az/',
-    author: 'oxu.az',
-    authorUrl: 'https://oxu.az/'
+    source: 'media.az',
+    baseUrl: 'https://media.az/',
+    author: 'media.az',
+    authorUrl: 'https://media.az/'
   });
 
-  const MONTHS = new Map([
-    ['yanvar', 0], ['fevral', 1], ['mart', 2], ['aprel', 3],
-    ['may', 4], ['iyun', 5], ['iyul', 6], ['avqust', 7],
-    ['sentyabr', 8], ['oktyabr', 9], ['noyabr', 10], ['dekabr', 11]
-  ]);
-
-  function foldAzeri(value) {
-    return String(value || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/\u0259/g, 'e')
-      .replace(/\u0131/g, 'i')
-      .replace(/\u015f/g, 's')
-      .replace(/\u00e7/g, 'c')
-      .replace(/\u011f/g, 'g')
-      .replace(/\u00f6/g, 'o');
+  function unique(values) {
+    return Array.from(new Set(values.filter(Boolean)));
   }
 
-  function timeParts(text) {
-    const match = String(text || '').match(/(\d{1,2}):(\d{2})/);
-    if (!match) return { hour: 0, minute: 0, hasTime: false };
-    return { hour: Number(match[1]), minute: Number(match[2]), hasTime: true };
-  }
-
-  function validDateParts(year, month, day, hour, minute) {
-    const date = new Date(year, month, day, hour, minute, 0, 0);
+  function validDateParts(year, month, day, hour, minute, second = 0) {
+    const date = new Date(year, month, day, hour, minute, second, 0);
     return date.getFullYear() === year
       && date.getMonth() === month
       && date.getDate() === day
       && date.getHours() === hour
       && date.getMinutes() === minute
+      && date.getSeconds() === second
       ? date
       : null;
   }
 
-  function parseOxuDate(rawText, now = new Date()) {
+  function parseMediaAzDateObject(rawText) {
     const raw = String(rawText || '').replace(/\u00a0/g, ' ').trim();
     if (!raw) return null;
-    const folded = foldAzeri(raw);
-    const { hour, minute } = timeParts(raw);
-    if (folded.includes('bu gun')) {
-      return validDateParts(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute);
-    }
-    if (folded.includes('dunen')) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - 1);
-      return validDateParts(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute);
-    }
-
-    let match = folded.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
+    let match = raw.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
     if (match) {
-      return validDateParts(Number(match[3]), Number(match[2]) - 1, Number(match[1]), hour, minute);
+      return validDateParts(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        Number(match[4]),
+        Number(match[5]),
+        Number(match[6] || 0)
+      );
     }
-
-    match = folded.match(/(\d{1,2})\s+([a-z]+)(?:\s+(\d{4}))?/);
+    match = raw.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
     if (!match) return null;
-    const month = MONTHS.get(match[2]);
-    if (month === undefined) return null;
-    const year = match[3] ? Number(match[3]) : now.getFullYear();
-    const parsed = validDateParts(year, month, Number(match[1]), hour, minute);
-    if (!parsed) return null;
-    if (!match[3] && parsed.getTime() > now.getTime() + 86400000) {
-      return validDateParts(year - 1, month, Number(match[1]), hour, minute);
-    }
-    return parsed;
+    return validDateParts(
+      Number(match[3]),
+      Number(match[2]) - 1,
+      Number(match[1]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6] || 0)
+    );
   }
 
-  function normalizeOxuUrl(value) {
+  function parseMediaAzDate(rawText) {
+    const date = parseMediaAzDateObject(rawText);
+    return date ? app.utils.formatTimestamp(date) : null;
+  }
+
+  function normalizeMediaAzUrl(value) {
     try {
       const url = new URL(value || '', SOURCE_CONFIG.baseUrl);
-      if (!/(^|\.)oxu\.az$/i.test(url.hostname)) return '';
+      if (!/(^|\.)media\.az$/i.test(url.hostname)) return '';
       url.hash = '';
       url.search = '';
       const result = url.toString();
@@ -89,11 +68,7 @@
     }
   }
 
-  function unique(values) {
-    return Array.from(new Set(values.filter(Boolean)));
-  }
-
-  class OxuScraper extends app.BaseScraper {
+  class MediaAzScraper extends app.BaseScraper {
     constructor() {
       super(SOURCE_CONFIG.source);
     }
@@ -107,40 +82,44 @@
     }
 
     resultsMatch(keyword) {
-      return /^\/all\/?$/i.test(location.pathname) && this.currentQuery() === app.utils.normalizeText(keyword);
+      return /^\/search\/?$/i.test(location.pathname) && this.currentQuery() === app.utils.normalizeText(keyword);
+    }
+
+    searchButton() {
+      return this.visible('button.header__search-open, .header__search-open, button[aria-label*="search" i], button[aria-label*="poisk" i]');
     }
 
     searchInput() {
-      return this.visible('form input[name="query"], input[name="query"]');
+      return this.visible('input.header__search__input[name="query"], form.header__search input[name="query"], input[name="query"]');
     }
 
     searchSubmit(input) {
-      return input?.closest('form')?.querySelector('button[type="submit"], button') || null;
+      return input?.closest('form')?.querySelector('button.header__search__btn[type="submit"], button[type="submit"], button') || null;
     }
 
     searchUrl(keyword) {
-      return `${SOURCE_CONFIG.baseUrl}all?query=${encodeURIComponent(String(keyword || ''))}`;
+      return `${SOURCE_CONFIG.baseUrl}search?query=${encodeURIComponent(String(keyword || ''))}`;
     }
 
     async search(keyword, ctx) {
-      await ctx.logger.info(`[oxu.az] Keyword started: ${keyword}`);
-      if (!/(^|\.)oxu\.az$/i.test(location.hostname)) {
+      await ctx.logger.info(`[media.az] Keyword started: ${keyword}`);
+      if (!/(^|\.)media\.az$/i.test(location.hostname)) {
         window.location.assign(SOURCE_CONFIG.baseUrl);
         return { success: false, navigating: true };
       }
       if (this.resultsMatch(keyword)) {
-        await ctx.logger.info('[oxu.az] Search results loaded');
+        await ctx.logger.info('[media.az] Search results loaded');
         return { success: true };
       }
 
       let submitted = false;
-      const button = this.visible('.custom-navbar-search-toggle');
+      const button = this.searchButton();
       if (button) {
-        await ctx.logger.info('[oxu.az] Search button found');
-        await ctx.navigation.click(button, 'Oxu.az search toggle');
-        await ctx.logger.info('[oxu.az] Search button clicked');
+        await ctx.logger.info('[media.az] Search button found');
+        await ctx.navigation.click(button, 'Media.az search toggle');
+        await ctx.logger.info('[media.az] Search button clicked');
       } else {
-        await ctx.logger.warn('[oxu.az] Search button was not found');
+        await ctx.logger.warn('[media.az] Search button was not found');
       }
 
       const input = await app.utils.waitFor(() => this.searchInput(), {
@@ -149,14 +128,14 @@
         token: ctx.token
       });
       if (input) {
-        await ctx.logger.info('[oxu.az] Search input visible');
-        const typed = await ctx.navigation.type(input, keyword, 'Oxu.az search input');
+        await ctx.logger.info('[media.az] Search input visible');
+        const typed = await ctx.navigation.type(input, keyword, 'Media.az search input');
         if (typed) {
-          await ctx.logger.info('[oxu.az] Keyword typed');
-          submitted = await ctx.navigation.pressEnter(input, () => this.resultsMatch(keyword), 'Oxu.az search input');
+          await ctx.logger.info('[media.az] Keyword typed');
+          submitted = await ctx.navigation.pressEnter(input, () => this.resultsMatch(keyword), 'Media.az search input');
           if (!submitted) {
             const submit = this.searchSubmit(input);
-            if (submit) submitted = await ctx.navigation.click(submit, 'Oxu.az search submit');
+            if (submit) submitted = await ctx.navigation.click(submit, 'Media.az search submit');
             if (submitted) {
               submitted = !!(await app.utils.waitFor(() => this.resultsMatch(keyword), {
                 timeoutMs: 7000,
@@ -169,19 +148,19 @@
       }
 
       if (submitted || this.resultsMatch(keyword)) {
-        await ctx.logger.info('[oxu.az] Search submitted');
-        await ctx.logger.info('[oxu.az] Search results loaded');
+        await ctx.logger.info('[media.az] Search submitted');
+        await ctx.logger.info('[media.az] Search results loaded');
         return { success: true };
       }
 
       const fallbackUrl = this.searchUrl(keyword);
-      await ctx.logger.warn('[oxu.az] UI search failed; using fallback URL', fallbackUrl);
+      await ctx.logger.warn('[media.az] UI search failed; using fallback URL', fallbackUrl);
       window.location.assign(fallbackUrl);
       return { success: false, navigating: true };
     }
 
     sourceUrl(value) {
-      return normalizeOxuUrl(value);
+      return normalizeMediaAzUrl(value);
     }
 
     mediaUrl(value) {
@@ -198,15 +177,15 @@
     }
 
     extractResultCandidate(element, index) {
-      const titleLink = element.querySelector('.post-item-title a[href], h2 a[href], a[href]');
-      const postUrl = this.sourceUrl(element.getAttribute('data-url') || titleLink?.getAttribute('href') || titleLink?.href);
+      const link = element.querySelector('a.news__item[href], a[href]');
+      const postUrl = this.sourceUrl(link?.getAttribute('href') || link?.href);
       if (!postUrl) return null;
-      const image = element.querySelector('.post-item-img img[src], img[src], img[data-src]');
-      const rawDate = this.text(element.querySelector('.post-item-meta')) || '';
+      const image = element.querySelector('.news__image img[src], .news__image img[data-src], img[src], img[data-src]');
+      const rawDate = element.getAttribute('data-timestamp') || this.text(element.querySelector('.news__date')) || '';
       return {
         index,
         postUrl,
-        title: this.text(titleLink) || this.text(element.querySelector('.post-item-title')) || '',
+        title: this.text(element.querySelector('.news__title')) || this.text(link) || '',
         previewImage: this.imageUrl(image),
         rawDate
       };
@@ -214,7 +193,7 @@
 
     resultCandidates() {
       const seen = new Set();
-      return this.allVisible('.rt-news-item')
+      return this.allVisible('.post-block')
         .map((element, index) => this.extractResultCandidate(element, index + 1))
         .filter((candidate) => {
           if (!candidate || seen.has(candidate.postUrl)) return false;
@@ -231,7 +210,7 @@
       for (let round = 1; round <= 8; round++) {
         ctx.token.throwIfCancelled();
         candidates = this.resultCandidates();
-        await ctx.logger.info(`[oxu.az] Result candidates found: ${candidates.length}`);
+        await ctx.logger.info(`[media.az] Result candidates found: ${candidates.length}`);
         if (candidates.length >= target) break;
         stableRounds = candidates.length === previousCount ? stableRounds + 1 : 0;
         if (stableRounds >= 2) break;
@@ -258,7 +237,7 @@
     }
 
     async openArticleInNewTab(candidate, ctx, ordinal, total) {
-      await ctx.logger.info(`[oxu.az] Opening article ${ordinal}/${total}: ${candidate.postUrl}`);
+      await ctx.logger.info(`[media.az] Opening article ${ordinal}/${total}: ${candidate.postUrl}`);
       const response = await this.sendRuntimeMessage({
         action: 'news:openArticleTab',
         runId: ctx.runId,
@@ -272,7 +251,7 @@
 
     buildPost(candidate, article) {
       const rawDate = article.rawDate || candidate.rawDate || '';
-      const parsedDate = article.postDate ? new Date(article.postDate) : parseOxuDate(rawDate);
+      const parsedDate = article.postDate ? new Date(article.postDate) : parseMediaAzDateObject(rawDate);
       const mediaUrls = unique([
         ...(article.mediaUrls || []),
         candidate.previewImage
@@ -303,32 +282,32 @@
         try {
           const article = await this.openArticleInNewTab(candidate, ctx, index + 1, candidates.length);
           const post = this.buildPost(candidate, article);
-          await ctx.logger.info(`[oxu.az] Article title extracted: ${post.title || ''}`);
-          await ctx.logger.info(`[oxu.az] Article date raw: ${article.rawDate || candidate.rawDate || ''}`);
-          await ctx.logger.info(`[oxu.az] Article date parsed: ${post.postDate || 'null'}`);
-          await ctx.logger.info(`[oxu.az] Article text length: ${String(post.text || '').length}`);
-          await ctx.logger.info(`[oxu.az] Media URLs collected: ${post.mediaUrls.length}`);
+          await ctx.logger.info(`[media.az] Article title extracted: ${post.title || ''}`);
+          await ctx.logger.info(`[media.az] Article date raw: ${article.rawDate || candidate.rawDate || ''}`);
+          await ctx.logger.info(`[media.az] Article date parsed: ${post.postDate || 'null'}`);
+          await ctx.logger.info(`[media.az] Article text length: ${String(post.text || '').length}`);
+          await ctx.logger.info(`[media.az] Media URLs collected: ${post.mediaUrls.length}`);
           const outcome = await ctx.onPost(post);
-          if (outcome.accepted) await ctx.logger.info(`[oxu.az] Post saved: ${post.postUrl}`);
+          if (outcome.accepted) await ctx.logger.info(`[media.az] Post saved: ${post.postUrl}`);
           if (outcome.limitReached) {
-            await ctx.logger.info('[oxu.az] Keyword finished: target');
+            await ctx.logger.info('[media.az] Keyword finished: target');
             return { reason: 'target' };
           }
           if (outcome.older) {
-            await ctx.logger.info('[oxu.az] Keyword finished: date-limit');
+            await ctx.logger.info('[media.az] Keyword finished: date-limit');
             return { reason: 'date-limit' };
           }
         } catch (error) {
           if (error instanceof app.utils.CancellationError) throw error;
-          await ctx.logger.warn('[oxu.az] Article skipped after scraping error', `${candidate.postUrl}: ${error.message}`);
+          await ctx.logger.warn('[media.az] Article skipped after scraping error', `${candidate.postUrl}: ${error.message}`);
         }
       }
-      await ctx.logger.info('[oxu.az] Keyword finished: exhausted');
+      await ctx.logger.info('[media.az] Keyword finished: exhausted');
       return { reason: 'exhausted' };
     }
 
     articleText(root = document) {
-      return Array.from(root.querySelectorAll('.post-detail-content-inner.resize-area > p'))
+      return Array.from(root.querySelectorAll('.news-inner__desc p'))
         .filter(app.utils.isVisible)
         .map((paragraph) => this.text(paragraph))
         .filter(Boolean)
@@ -337,25 +316,34 @@
 
     articleMedia(root = document) {
       const urls = [];
-      root.querySelectorAll('.post-detail-img img[src], .post-detail-img img[data-src], .post-detail-content-inner.resize-area img[src], .post-detail-content-inner.resize-area img[data-src]')
+      root.querySelectorAll('.news-inner__image img[src], .news-inner__image img[data-src], .news-inner__desc img[src], .news-inner__desc img[data-src]')
         .forEach((image) => urls.push(this.imageUrl(image)));
-      root.querySelectorAll('.audio-block[data-url]').forEach((audio) => urls.push(this.mediaUrl(audio.getAttribute('data-url'))));
+      root.querySelectorAll('video[src], source[src], audio[src]')
+        .forEach((media) => urls.push(this.mediaUrl(media.currentSrc || media.src || media.getAttribute('src'))));
       return unique(urls);
     }
 
+    articleRawDate(root, preview = {}) {
+      const dataTimestamp = root.getAttribute?.('data-timestamp') || preview.rawDate || '';
+      if (parseMediaAzDateObject(dataTimestamp)) return dataTimestamp;
+      const values = Array.from(root.querySelectorAll('.news-inner__info li'))
+        .map((element) => this.text(element))
+        .filter(Boolean);
+      return values.find((value) => parseMediaAzDateObject(value)) || dataTimestamp;
+    }
+
     extractArticleFromPage(preview = {}) {
-      const root = document.querySelector('.post-detail[data-stats-collect="1"], .post-detail') || document;
-      const title = this.text(root.querySelector('.post-detail-title h1')) || this.text(root.querySelector('h1')) || preview.title || '';
-      const rawDate = this.text(root.querySelector('.post-detail-meta span:first-child')) || preview.rawDate || '';
-      const parsedDate = parseOxuDate(rawDate);
-      const text = this.articleText(root);
+      const root = document.querySelector('.news-inner__body.rt-news-item, .news-inner__body, .rt-news-item') || document;
+      const title = this.text(root.querySelector('.news-inner__title')) || this.text(root.querySelector('h1')) || preview.title || '';
+      const rawDate = this.articleRawDate(root, preview);
+      const parsedDate = parseMediaAzDateObject(rawDate);
       return {
         source: SOURCE_CONFIG.source,
-        postUrl: normalizeOxuUrl(location.href) || preview.postUrl || '',
+        postUrl: normalizeMediaAzUrl(root.getAttribute?.('data-url')) || normalizeMediaAzUrl(location.href) || preview.postUrl || '',
         author: SOURCE_CONFIG.author,
         authorUrl: SOURCE_CONFIG.authorUrl,
         title,
-        text,
+        text: this.articleText(root),
         rawDate,
         postDate: parsedDate ? app.utils.formatTimestamp(parsedDate) : null,
         mediaUrls: this.articleMedia(root),
@@ -365,8 +353,8 @@
   }
 
   app.parsers = app.parsers || {};
-  app.parsers.oxuDate = parseOxuDate;
-  app.parsers.oxuUrl = normalizeOxuUrl;
-  app.parsers.oxuSourceConfig = SOURCE_CONFIG;
-  app.scrapers[SOURCE_CONFIG.source] = new OxuScraper();
+  app.parsers.mediaAzDate = parseMediaAzDate;
+  app.parsers.mediaAzUrl = normalizeMediaAzUrl;
+  app.parsers.mediaAzSourceConfig = SOURCE_CONFIG;
+  app.scrapers[SOURCE_CONFIG.source] = new MediaAzScraper();
 })(globalThis.ScraperApp);

@@ -7,7 +7,7 @@
 
   function publicPost(post) {
     const payload = Object.fromEntries(POST_FIELDS.map((field) => [field, post[field]]));
-    for (const optionalField of ['title', 'category']) {
+    for (const optionalField of ['title']) {
       if (post[optionalField]) payload[optionalField] = post[optionalField];
     }
     return payload;
