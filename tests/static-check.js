@@ -13,6 +13,7 @@ for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok']) {
 assert.ok(scripts.includes('scrapers/oxu.js'), 'oxu.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/media.js'), 'media.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/one-news.js'), '1news.az scraper must be a separate content module');
+assert.ok(scripts.includes('scrapers/haqqin.js'), 'haqqin.az scraper must be a separate content module');
 assert.equal(scripts.at(-1), 'content.js');
 assert.ok(manifest.host_permissions.includes('*://oxu.az/*'), 'oxu.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://oxu.az/*'), 'oxu.az content script match is required');
@@ -20,6 +21,8 @@ assert.ok(manifest.host_permissions.includes('*://media.az/*'), 'media.az host p
 assert.ok(manifest.content_scripts[0].matches.includes('*://media.az/*'), 'media.az content script match is required');
 assert.ok(manifest.host_permissions.includes('*://1news.az/*'), '1news.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://1news.az/*'), '1news.az content script match is required');
+assert.ok(manifest.host_permissions.includes('*://haqqin.az/*'), 'haqqin.az host permission is required');
+assert.ok(manifest.content_scripts[0].matches.includes('*://haqqin.az/*'), 'haqqin.az content script match is required');
 
 const sourceFiles = [];
 function walk(directory) {
@@ -99,6 +102,19 @@ assert.match(oneNewsSource, /mainArticle \.content > p/);
 assert.match(oneNewsSource, /authorNDate \.date/);
 assert.match(oneNewsSource, /app\.parsers\.parse1NewsDate/);
 assert.doesNotMatch(oneNewsSource, /category:/);
+const haqqinSource = fs.readFileSync(path.join(root, 'scrapers', 'haqqin.js'), 'utf8');
+assert.match(haqqinSource, /source: 'haqqin\.az'/);
+assert.match(haqqinSource, /\.page-header__open-search-form-button/);
+assert.match(haqqinSource, /form\.page-header__search-form input\[name="q"\], \.search-form__input\[name="q"\]/);
+assert.match(haqqinSource, /search\/\$\{encodeURIComponent/);
+assert.match(haqqinSource, /a\.news-list__item\.news-item, \.news-list__item\.news-item/);
+assert.match(haqqinSource, /load-more__button/);
+assert.match(haqqinSource, /news:openArticleTab/);
+assert.match(haqqinSource, /article__content \.block-text p/);
+assert.match(haqqinSource, /article__date/);
+assert.match(haqqinSource, /block-photo img/);
+assert.match(haqqinSource, /app\.parsers\.parseHaqqinDate/);
+assert.doesNotMatch(haqqinSource, /category:/);
 const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 const contentSource = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
 assert.match(backgroundSource, /news:openArticleTab/);
