@@ -93,6 +93,7 @@
     if (platform === 'media.az') return { domain: 'media.az', url: 'https://media.az/' };
     if (platform === '1news.az') return { domain: '1news.az', url: 'https://1news.az/az' };
     if (platform === 'haqqin.az') return { domain: 'haqqin.az', url: 'https://haqqin.az/' };
+    if (platform === 'caliber.az') return { domain: 'caliber.az', url: 'https://caliber.az/' };
     return { domain: 'x.com', url: 'https://x.com/explore' };
   }
 
