@@ -36,7 +36,8 @@ for (const file of [
   'scrapers/oxu.js',
   'scrapers/media.js',
   'scrapers/one-news.js',
-  'scrapers/haqqin.js'
+  'scrapers/haqqin.js',
+  'scrapers/caliber.js'
 ]) {
   require(path.join(root, file));
 }
@@ -65,6 +66,7 @@ test('result filename follows source_result_DD_MM_YYYY.jsonl', () => {
   assert.equal(app.utils.buildFilename('media.az', new Date(2026, 5, 25)), 'media.az_result_25_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('1news.az', new Date(2026, 5, 25)), '1news.az_result_25_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('haqqin.az', new Date(2026, 5, 25)), 'haqqin.az_result_25_06_2026.jsonl');
+  assert.equal(app.utils.buildFilename('caliber.az', new Date(2026, 5, 25)), 'caliber.az_result_25_06_2026.jsonl');
 });
 
 test('Facebook parses absolute tooltip date without replacing it with now', () => {
@@ -335,6 +337,19 @@ test('Haqqin.az parses publication dates in local timezone', () => {
   assert.equal(app.parsers.parseHaqqinDate('31.02.2026 15:31', now), null);
 });
 
+test('Caliber.az parses Russian publication dates in local timezone', () => {
+  assert.equal(
+    app.parsers.parseCaliberDate('25 \u0418\u044e\u043d\u044f 2026 17:24'),
+    app.utils.formatTimestamp(new Date(2026, 5, 25, 17, 24, 0))
+  );
+  assert.equal(
+    app.parsers.parseCaliberDate('28 \u042f\u043d\u0432\u0430\u0440\u044f 2026 23:33'),
+    app.utils.formatTimestamp(new Date(2026, 0, 28, 23, 33, 0))
+  );
+  assert.equal(app.parsers.parseCaliberDate('31 \u0424\u0435\u0432\u0440\u0430\u043b\u044f 2026 12:00'), null);
+  assert.equal(app.parsers.parseCaliberDate('bad date'), null);
+});
+
 test('News payload never exposes title or category', () => {
   const normalized = app.utils.normalizePost({
     postDate: '2026-06-25T12:02:00+04:00',
@@ -416,7 +431,7 @@ test('all platform scrapers implement the shared public contract', () => {
     'ensureReady', 'searchKeyword', 'scrapePosts', 'parsePost', 'expandPostText',
     'parsePostDate', 'shouldSkipPost', 'stop', 'cleanup'
   ];
-  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'oxu.az', 'media.az', '1news.az', 'haqqin.az']) {
+  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az']) {
     for (const method of methods) {
       assert.equal(typeof app.scrapers[platform][method], 'function', `${platform}.${method} must exist`);
     }

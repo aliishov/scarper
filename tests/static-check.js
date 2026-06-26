@@ -14,6 +14,7 @@ assert.ok(scripts.includes('scrapers/oxu.js'), 'oxu.az scraper must be a separat
 assert.ok(scripts.includes('scrapers/media.js'), 'media.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/one-news.js'), '1news.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/haqqin.js'), 'haqqin.az scraper must be a separate content module');
+assert.ok(scripts.includes('scrapers/caliber.js'), 'caliber.az scraper must be a separate content module');
 assert.equal(scripts.at(-1), 'content.js');
 assert.ok(manifest.host_permissions.includes('*://oxu.az/*'), 'oxu.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://oxu.az/*'), 'oxu.az content script match is required');
@@ -23,6 +24,8 @@ assert.ok(manifest.host_permissions.includes('*://1news.az/*'), '1news.az host p
 assert.ok(manifest.content_scripts[0].matches.includes('*://1news.az/*'), '1news.az content script match is required');
 assert.ok(manifest.host_permissions.includes('*://haqqin.az/*'), 'haqqin.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://haqqin.az/*'), 'haqqin.az content script match is required');
+assert.ok(manifest.host_permissions.includes('*://caliber.az/*'), 'caliber.az host permission is required');
+assert.ok(manifest.content_scripts[0].matches.includes('*://caliber.az/*'), 'caliber.az content script match is required');
 
 const sourceFiles = [];
 function walk(directory) {
@@ -115,6 +118,23 @@ assert.match(haqqinSource, /article__date/);
 assert.match(haqqinSource, /block-photo img/);
 assert.match(haqqinSource, /app\.parsers\.parseHaqqinDate/);
 assert.doesNotMatch(haqqinSource, /category:/);
+const caliberSource = fs.readFileSync(path.join(root, 'scrapers', 'caliber.js'), 'utf8');
+assert.match(caliberSource, /source: 'caliber\.az'/);
+assert.match(caliberSource, /\.header_button\.search_button, \.search_button/);
+assert.match(caliberSource, /\.input_block input\[type="text"\]/);
+assert.match(caliberSource, /search\/\$\{encodeURIComponent/);
+assert.match(caliberSource, /\.float_block/);
+assert.match(caliberSource, /float_block_title/);
+assert.match(caliberSource, /float_block_time/);
+assert.match(caliberSource, /backgroundImageUrl/);
+assert.match(caliberSource, /Scrolling for more results/);
+assert.match(caliberSource, /news:openArticleTab/);
+assert.match(caliberSource, /\.post_body p/);
+assert.match(caliberSource, /\.post_time/);
+assert.match(caliberSource, /\.post_cover/);
+assert.match(caliberSource, /app\.parsers\.parseCaliberDate/);
+assert.doesNotMatch(caliberSource, /category:/);
+assert.doesNotMatch(caliberSource, /views:/);
 const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 const contentSource = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
 assert.match(backgroundSource, /news:openArticleTab/);
