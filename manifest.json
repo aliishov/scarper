@@ -26,6 +26,8 @@
     "*://www.media.az/*",
     "*://1news.az/*",
     "*://www.1news.az/*",
+    "*://haqqin.az/*",
+    "*://www.haqqin.az/*",
     "http://localhost/*"
   ],
   "background": {
@@ -53,7 +55,9 @@
         "*://media.az/*",
         "*://www.media.az/*",
         "*://1news.az/*",
-        "*://www.1news.az/*"
+        "*://www.1news.az/*",
+        "*://haqqin.az/*",
+        "*://www.haqqin.az/*"
       ],
       "js": [
         "core/namespace.js",
@@ -71,6 +75,7 @@
         "scrapers/oxu.js",
         "scrapers/media.js",
         "scrapers/one-news.js",
+        "scrapers/haqqin.js",
         "core/state-machine.js",
         "content.js"
       ],
