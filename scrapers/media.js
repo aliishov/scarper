@@ -371,7 +371,6 @@
         postUrl: article.postUrl || candidate.postUrl,
         author: SOURCE_CONFIG.author,
         authorUrl: SOURCE_CONFIG.authorUrl,
-        title: article.title || candidate.title,
         text: article.text || '',
         mediaUrls,
         postDate: parsedDate ? app.utils.formatTimestamp(parsedDate) : null,
