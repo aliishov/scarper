@@ -12,11 +12,14 @@ for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok']) {
 }
 assert.ok(scripts.includes('scrapers/oxu.js'), 'oxu.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/media.js'), 'media.az scraper must be a separate content module');
+assert.ok(scripts.includes('scrapers/one-news.js'), '1news.az scraper must be a separate content module');
 assert.equal(scripts.at(-1), 'content.js');
 assert.ok(manifest.host_permissions.includes('*://oxu.az/*'), 'oxu.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://oxu.az/*'), 'oxu.az content script match is required');
 assert.ok(manifest.host_permissions.includes('*://media.az/*'), 'media.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://media.az/*'), 'media.az content script match is required');
+assert.ok(manifest.host_permissions.includes('*://1news.az/*'), '1news.az host permission is required');
+assert.ok(manifest.content_scripts[0].matches.includes('*://1news.az/*'), '1news.az content script match is required');
 
 const sourceFiles = [];
 function walk(directory) {
@@ -84,6 +87,18 @@ assert.match(mediaSource, /date_start=\$\{parsed\.iso\}&date_end=&category=&sort
 assert.match(mediaSource, /app\.parsers\.mediaAzDateLimit/);
 assert.match(mediaSource, /app\.parsers\.mediaAzSearchUrl/);
 assert.doesNotMatch(mediaSource, /category:/);
+const oneNewsSource = fs.readFileSync(path.join(root, 'scrapers', 'one-news.js'), 'utf8');
+assert.match(oneNewsSource, /source: '1news\.az'/);
+assert.match(oneNewsSource, /#searchInput, input\[name="q"\], \.search form input/);
+assert.match(oneNewsSource, /gsc-option-menu-container/);
+assert.match(oneNewsSource, /Sorting results by Date/);
+assert.match(oneNewsSource, /gsc-cursor-page/);
+assert.match(oneNewsSource, /gsc-webResult\.gsc-result, \.gsc-result/);
+assert.match(oneNewsSource, /news:openArticleTab/);
+assert.match(oneNewsSource, /mainArticle \.content > p/);
+assert.match(oneNewsSource, /authorNDate \.date/);
+assert.match(oneNewsSource, /app\.parsers\.parse1NewsDate/);
+assert.doesNotMatch(oneNewsSource, /category:/);
 const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 const contentSource = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
 assert.match(backgroundSource, /news:openArticleTab/);
@@ -144,6 +159,10 @@ assert.doesNotMatch(tiktokSource, /assign\(target\.postUrl\)/);
 assert.match(stateMachineSource, /if \(result\?\.navigating\)/);
 assert.match(stateMachineSource, /scraperProgress: null/);
 assert.match(stateMachineSource, /reason !== 'end-of-feed'/);
+const serverSource = fs.readFileSync(path.join(root, 'core', 'server.js'), 'utf8');
+const utilsSource = fs.readFileSync(path.join(root, 'core', 'utils.js'), 'utf8');
+assert.doesNotMatch(serverSource, /optionalField|title|category/);
+assert.doesNotMatch(utilsSource, /optionalField|title|category/);
 assert.equal(globalThis.ScraperApp, undefined);
 
 console.log('Static architecture checks passed');

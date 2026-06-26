@@ -91,6 +91,7 @@
     if (platform === 'tiktok') return { domain: 'tiktok.com', url: 'https://www.tiktok.com/' };
     if (platform === 'oxu.az') return { domain: 'oxu.az', url: 'https://oxu.az/' };
     if (platform === 'media.az') return { domain: 'media.az', url: 'https://media.az/' };
+    if (platform === '1news.az') return { domain: '1news.az', url: 'https://1news.az/az' };
     return { domain: 'x.com', url: 'https://x.com/explore' };
   }
 

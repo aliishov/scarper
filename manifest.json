@@ -24,6 +24,8 @@
     "*://www.oxu.az/*",
     "*://media.az/*",
     "*://www.media.az/*",
+    "*://1news.az/*",
+    "*://www.1news.az/*",
     "http://localhost/*"
   ],
   "background": {
@@ -49,7 +51,9 @@
         "*://oxu.az/*",
         "*://www.oxu.az/*",
         "*://media.az/*",
-        "*://www.media.az/*"
+        "*://www.media.az/*",
+        "*://1news.az/*",
+        "*://www.1news.az/*"
       ],
       "js": [
         "core/namespace.js",
@@ -66,6 +70,7 @@
         "scrapers/tiktok.js",
         "scrapers/oxu.js",
         "scrapers/media.js",
+        "scrapers/one-news.js",
         "core/state-machine.js",
         "content.js"
       ],

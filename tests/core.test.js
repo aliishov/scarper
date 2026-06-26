@@ -34,7 +34,8 @@ for (const file of [
   'scrapers/instagram.js',
   'scrapers/tiktok.js',
   'scrapers/oxu.js',
-  'scrapers/media.js'
+  'scrapers/media.js',
+  'scrapers/one-news.js'
 ]) {
   require(path.join(root, file));
 }
@@ -61,6 +62,7 @@ test('result filename follows source_result_DD_MM_YYYY.jsonl', () => {
   assert.equal(app.utils.buildFilename('facebook', new Date(2026, 5, 20)), 'facebook_result_20_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('oxu.az', new Date(2026, 5, 25)), 'oxu.az_result_25_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('media.az', new Date(2026, 5, 25)), 'media.az_result_25_06_2026.jsonl');
+  assert.equal(app.utils.buildFilename('1news.az', new Date(2026, 5, 25)), '1news.az_result_25_06_2026.jsonl');
 });
 
 test('Facebook parses absolute tooltip date without replacing it with now', () => {
@@ -302,7 +304,15 @@ test('Media.az date limit search URL includes date_start filters', () => {
   );
 });
 
-test('News payload keeps title and never exposes category', () => {
+test('1news.az parses article publication dates in local timezone', () => {
+  assert.equal(
+    app.parsers.parse1NewsDate('19:12 - 17 / 06 / 2026'),
+    app.utils.formatTimestamp(new Date(2026, 5, 17, 19, 12, 0))
+  );
+  assert.equal(app.parsers.parse1NewsDate('bad date'), null);
+});
+
+test('News payload never exposes title or category', () => {
   const normalized = app.utils.normalizePost({
     postDate: '2026-06-25T12:02:00+04:00',
     postUrl: 'https://oxu.az/cemiyyet/example',
@@ -314,7 +324,8 @@ test('News payload keeps title and never exposes category', () => {
     mediaUrls: []
   }, { keyword: 'test', source: 'oxu.az' });
   const payload = app.server.toPayload(normalized);
-  assert.equal(payload.title, 'Example title');
+  assert.equal('title' in normalized, false);
+  assert.equal('title' in payload, false);
   assert.equal('category' in normalized, false);
   assert.equal('category' in payload, false);
   assert.equal(app.utils.canonicalPostKey(normalized), 'oxu.az:https://oxu.az/cemiyyet/example');
@@ -382,7 +393,7 @@ test('all platform scrapers implement the shared public contract', () => {
     'ensureReady', 'searchKeyword', 'scrapePosts', 'parsePost', 'expandPostText',
     'parsePostDate', 'shouldSkipPost', 'stop', 'cleanup'
   ];
-  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'oxu.az', 'media.az']) {
+  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'oxu.az', 'media.az', '1news.az']) {
     for (const method of methods) {
       assert.equal(typeof app.scrapers[platform][method], 'function', `${platform}.${method} must exist`);
     }
