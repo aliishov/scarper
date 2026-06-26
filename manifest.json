@@ -28,6 +28,8 @@
     "*://www.1news.az/*",
     "*://haqqin.az/*",
     "*://www.haqqin.az/*",
+    "*://caliber.az/*",
+    "*://www.caliber.az/*",
     "http://localhost/*"
   ],
   "background": {
@@ -57,7 +59,9 @@
         "*://1news.az/*",
         "*://www.1news.az/*",
         "*://haqqin.az/*",
-        "*://www.haqqin.az/*"
+        "*://www.haqqin.az/*",
+        "*://caliber.az/*",
+        "*://www.caliber.az/*"
       ],
       "js": [
         "core/namespace.js",
@@ -76,6 +80,7 @@
         "scrapers/media.js",
         "scrapers/one-news.js",
         "scrapers/haqqin.js",
+        "scrapers/caliber.js",
         "core/state-machine.js",
         "content.js"
       ],
