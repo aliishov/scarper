@@ -16,6 +16,7 @@ assert.ok(scripts.includes('scrapers/one-news.js'), '1news.az scraper must be a 
 assert.ok(scripts.includes('scrapers/haqqin.js'), 'haqqin.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/caliber.js'), 'caliber.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/qafqazinfo.js'), 'qafqazinfo.az scraper must be a separate content module');
+assert.ok(scripts.includes('scrapers/lent.js'), 'lent.az scraper must be a separate content module');
 assert.equal(scripts.at(-1), 'content.js');
 assert.ok(manifest.host_permissions.includes('*://oxu.az/*'), 'oxu.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://oxu.az/*'), 'oxu.az content script match is required');
@@ -29,6 +30,8 @@ assert.ok(manifest.host_permissions.includes('*://caliber.az/*'), 'caliber.az ho
 assert.ok(manifest.content_scripts[0].matches.includes('*://caliber.az/*'), 'caliber.az content script match is required');
 assert.ok(manifest.host_permissions.includes('*://qafqazinfo.az/*'), 'qafqazinfo.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://qafqazinfo.az/*'), 'qafqazinfo.az content script match is required');
+assert.ok(manifest.host_permissions.includes('*://lent.az/*'), 'lent.az host permission is required');
+assert.ok(manifest.content_scripts[0].matches.includes('*://lent.az/*'), 'lent.az content script match is required');
 
 const sourceFiles = [];
 function walk(directory) {
@@ -182,6 +185,30 @@ assert.match(qafqazinfoSource, /\.panel-body > img\.img-responsive\[src\]/);
 assert.match(qafqazinfoSource, /app\.parsers\.parseQafqazinfoDate/);
 assert.doesNotMatch(qafqazinfoSource, /category:/);
 assert.doesNotMatch(qafqazinfoSource, /views:/);
+const lentSource = fs.readFileSync(path.join(root, 'scrapers', 'lent.js'), 'utf8');
+assert.match(lentSource, /source: 'lent\.az'/);
+assert.match(lentSource, /#search_btn, button\[aria-label="Search"\]/);
+assert.match(lentSource, /input\[name="search"\]#search/);
+assert.match(lentSource, /select\[name="type"\]/);
+assert.match(lentSource, /lentSearchType/);
+assert.match(lentSource, /Date limit enabled/);
+assert.match(lentSource, /Selected search type/);
+assert.match(lentSource, /axtaris-neticesi\?search=\$\{encodeURIComponent/);
+assert.match(lentSource, /\.item\[id\^="news_"\]\[data-id\], \.item:not\(\.rek_item\)/);
+assert.match(lentSource, /\.item\.rek_item, \.rek_item, \.rek_baner_mobile, \.custom-banner/);
+assert.match(lentSource, /Ad card skipped/);
+assert.match(lentSource, /\.pagination li\.active_li span/);
+assert.match(lentSource, /\.pagination li a\[href\]/);
+assert.match(lentSource, /a\[rel="next"\]\[href\]/);
+assert.match(lentSource, /Moving to page/);
+assert.match(lentSource, /news:openArticleTab/);
+assert.match(lentSource, /\.news_content\[itemprop="articleBody"\] p, \.news_content p/);
+assert.match(lentSource, /\.news_img \.overlay/);
+assert.match(lentSource, /\.news_img img\[src\], \.news_content img\[src\]/);
+assert.match(lentSource, /app\.parsers\.parseLentDate/);
+assert.match(lentSource, /app\.parsers\.lentSearchType/);
+assert.doesNotMatch(lentSource, /category:/);
+assert.doesNotMatch(lentSource, /views:/);
 const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 const contentSource = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
 assert.match(backgroundSource, /news:openArticleTab/);

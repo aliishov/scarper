@@ -32,6 +32,8 @@
     "*://www.caliber.az/*",
     "*://qafqazinfo.az/*",
     "*://www.qafqazinfo.az/*",
+    "*://lent.az/*",
+    "*://www.lent.az/*",
     "http://localhost/*"
   ],
   "background": {
@@ -65,7 +67,9 @@
         "*://caliber.az/*",
         "*://www.caliber.az/*",
         "*://qafqazinfo.az/*",
-        "*://www.qafqazinfo.az/*"
+        "*://www.qafqazinfo.az/*",
+        "*://lent.az/*",
+        "*://www.lent.az/*"
       ],
       "js": [
         "core/namespace.js",
@@ -86,6 +90,7 @@
         "scrapers/haqqin.js",
         "scrapers/caliber.js",
         "scrapers/qafqazinfo.js",
+        "scrapers/lent.js",
         "core/state-machine.js",
         "content.js"
       ],
