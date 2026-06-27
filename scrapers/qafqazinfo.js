@@ -308,20 +308,25 @@
       return normalizeQafqazinfoUrl(value);
     }
 
-    nextPageLink() {
-      return this.visible('.yiiPager li.next a[href]');
+    nextPageLink(currentPage = this.currentPageNumber()) {
+      const targetPage = currentPage + 1;
+      return this.allVisible('.yiiPager li.page a[href]')
+        .find((link) => Number(this.text(link)) === targetPage) || null;
     }
 
-    nextPageUrl() {
-      const nextLink = this.nextPageLink();
+    nextPageUrl(currentPage = this.currentPageNumber()) {
+      const nextLink = this.nextPageLink(currentPage);
       return this.normalizePageUrl(nextLink?.getAttribute('href') || nextLink?.href);
     }
 
     async waitForResultsPageReady(ctx) {
+      await ctx.logger.info('[qafqazinfo.az] Waiting for page load');
       await ctx.logger.info('[qafqazinfo.az] Waiting for page load (timeout 30s)');
       const previousUrl = this.readPaginationMeta('previousUrl');
       const expectedUrl = this.readPaginationMeta('expectedUrl');
       const previousSignature = this.readPaginationMeta('previousSignature');
+      const expectedPage = expectedUrl ? this.pageNumberFromUrl(expectedUrl) : 0;
+      const minimumReadyAt = expectedUrl ? Date.now() + 10000 : Date.now();
       const deadline = Date.now() + 30000;
       let urlLogged = false;
       let domLogged = false;
@@ -353,7 +358,7 @@
           resultsLogged = true;
         }
 
-        if (urlChanged && expectedReached && domComplete && resultsDetected && oldCardsGone) {
+        if (Date.now() >= minimumReadyAt && urlChanged && expectedReached && domComplete && resultsDetected && oldCardsGone) {
           readySnapshot = snapshot;
           break;
         }
@@ -365,21 +370,70 @@
         if (!readySnapshot.candidates.length) await ctx.logger.warn('[qafqazinfo.az] Results page was not ready before timeout');
       }
       if (readySnapshot.candidates.length) await ctx.logger.info('[qafqazinfo.az] Results page ready');
+      if (readySnapshot.candidates.length && expectedPage) {
+        await ctx.logger.info(`[qafqazinfo.az] Results page ${expectedPage} loaded`);
+        await ctx.logger.info(`[qafqazinfo.az] Continue scraping page ${expectedPage}`);
+      }
       this.clearPaginationMeta();
       return readySnapshot;
     }
 
+    async waitForClickedPageUpdate(ctx, beforeUrl, beforeSignature, targetPage) {
+      await ctx.logger.info('[qafqazinfo.az] Waiting for page load');
+      const startedAt = Date.now();
+      const minimumReadyAt = startedAt + 10000;
+      const deadline = startedAt + 30000;
+      let urlLogged = false;
+      let domLogged = false;
+      let resultsLogged = false;
+      while (Date.now() < deadline) {
+        ctx.token.throwIfCancelled();
+        const currentUrl = this.normalizePageUrl(location.href);
+        const urlChanged = currentUrl !== beforeUrl;
+        if (urlChanged && !urlLogged) {
+          await ctx.logger.info('[qafqazinfo.az] URL changed');
+          urlLogged = true;
+        }
+        const domComplete = document.readyState === 'complete';
+        if (domComplete && !domLogged) {
+          await ctx.logger.info('[qafqazinfo.az] DOM fully loaded');
+          domLogged = true;
+        }
+        const snapshot = this.resultCandidatesSnapshot();
+        const signature = snapshot.candidates.map((candidate) => candidate.postUrl).join('|');
+        const resultsDetected = snapshot.containerFound && snapshot.candidates.length > 0;
+        if (resultsDetected && !resultsLogged) {
+          await ctx.logger.info('[qafqazinfo.az] Search results detected');
+          resultsLogged = true;
+        }
+        const pageReached = this.currentPageNumber() === targetPage || this.pageNumberFromUrl(currentUrl) === targetPage;
+        const resultsChanged = signature && signature !== beforeSignature;
+        if (Date.now() >= minimumReadyAt && domComplete && resultsDetected && (urlChanged || resultsChanged || pageReached)) {
+          await ctx.logger.info('[qafqazinfo.az] Results page ready');
+          await ctx.logger.info(`[qafqazinfo.az] Results page ${targetPage} loaded`);
+          await ctx.logger.info(`[qafqazinfo.az] Continue scraping page ${targetPage}`);
+          return true;
+        }
+        await app.utils.sleep(500, ctx.token);
+      }
+      await ctx.logger.warn(`[qafqazinfo.az] Results page ${targetPage} was not confirmed before timeout`);
+      return false;
+    }
+
     async moveToNextPage(ctx, visitedPageUrls) {
-      const nextLink = this.nextPageLink();
+      const currentPage = this.currentPageNumber();
+      await ctx.logger.info(`[qafqazinfo.az] Current page: ${currentPage}`);
+      const targetPage = currentPage + 1;
+      const nextLink = this.nextPageLink(currentPage);
       if (!nextLink) {
+        await ctx.logger.info('[qafqazinfo.az] No next page found');
         await ctx.logger.info('[qafqazinfo.az] Pagination finished');
-        await ctx.logger.info('[qafqazinfo.az] No next page');
         return { moved: false };
       }
       const nextUrl = this.normalizePageUrl(nextLink.getAttribute('href') || nextLink.href);
       if (!nextUrl) {
+        await ctx.logger.info('[qafqazinfo.az] No next page found');
         await ctx.logger.info('[qafqazinfo.az] Pagination finished');
-        await ctx.logger.info('[qafqazinfo.az] No next page');
         return { moved: false };
       }
       if (visitedPageUrls.has(nextUrl)) {
@@ -387,11 +441,13 @@
         await ctx.logger.info('[qafqazinfo.az] Pagination finished');
         return { moved: false };
       }
-      if (this.pageNumberFromUrl(nextUrl) <= this.currentPageNumber()) {
+      if (this.pageNumberFromUrl(nextUrl) !== targetPage) {
+        await ctx.logger.info('[qafqazinfo.az] No next page found');
         await ctx.logger.info('[qafqazinfo.az] Next page already visited; stopping pagination');
         await ctx.logger.info('[qafqazinfo.az] Pagination finished');
         return { moved: false };
       }
+      await ctx.logger.info(`[qafqazinfo.az] Next page found: ${targetPage}`);
       await ctx.logger.info(`[qafqazinfo.az] Next page URL: ${nextUrl}`);
       await ctx.logger.info(`[qafqazinfo.az] Moving to next page: ${nextUrl}`);
       await ctx.logger.info('[qafqazinfo.az] Navigating to next page');
@@ -399,17 +455,15 @@
       this.writePaginationMeta('expectedUrl', nextUrl);
       this.writePaginationMeta('previousSignature', this.resultSignature());
       const beforeUrl = this.normalizePageUrl(location.href);
-      const clicked = await ctx.navigation.click(nextLink, 'qafqazinfo.az next page link');
-      const urlChanged = clicked && await app.utils.waitFor(() => this.normalizePageUrl(location.href) !== beforeUrl, {
-        timeoutMs: 10000,
-        intervalMs: 500,
-        token: ctx.token
-      });
-      if (!urlChanged) {
-        await ctx.logger.warn('[qafqazinfo.az] Next page click did not navigate; using direct URL fallback');
-        window.location.assign(nextUrl);
+      const beforeSignature = this.resultSignature();
+      await ctx.logger.info(`[qafqazinfo.az] Clicking page ${targetPage}`);
+      const clicked = await ctx.navigation.click(nextLink, `qafqazinfo.az page ${targetPage}`);
+      if (!clicked) {
+        await ctx.logger.warn(`[qafqazinfo.az] Page ${targetPage} click failed`);
+        return { moved: false };
       }
-      return { moved: true, navigating: true };
+      const loadedInCurrentDocument = await this.waitForClickedPageUpdate(ctx, beforeUrl, beforeSignature, targetPage);
+      return loadedInCurrentDocument ? { moved: true } : { moved: true, navigating: true };
     }
 
     sendRuntimeMessage(message, token) {
