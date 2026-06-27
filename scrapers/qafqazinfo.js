@@ -264,6 +264,28 @@
       return this.resultCandidatesSnapshot().candidates;
     }
 
+    resultSignature() {
+      return this.resultCandidates().map((candidate) => candidate.postUrl).join('|');
+    }
+
+    paginationMetaKey(name) {
+      return `qafqazinfo:${name}`;
+    }
+
+    readPaginationMeta(name) {
+      try { return sessionStorage.getItem(this.paginationMetaKey(name)) || ''; } catch (error) { return ''; }
+    }
+
+    writePaginationMeta(name, value) {
+      try { sessionStorage.setItem(this.paginationMetaKey(name), String(value || '')); } catch (error) {}
+    }
+
+    clearPaginationMeta() {
+      for (const name of ['previousUrl', 'expectedUrl', 'previousSignature']) {
+        try { sessionStorage.removeItem(this.paginationMetaKey(name)); } catch (error) {}
+      }
+    }
+
     currentPageNumber() {
       try {
         const page = Number(new URL(location.href).searchParams.get('page') || 1);
@@ -286,34 +308,107 @@
       return normalizeQafqazinfoUrl(value);
     }
 
-    nextPageUrl(visitedPageUrls = new Set()) {
-      const currentPage = this.currentPageNumber();
-      const nextLink = this.visible('.yiiPager li.next a[href]');
-      const nextUrl = this.normalizePageUrl(nextLink?.getAttribute('href') || nextLink?.href);
-      if (nextUrl && this.pageNumberFromUrl(nextUrl) > currentPage && !visitedPageUrls.has(nextUrl)) return nextUrl;
+    nextPageLink() {
+      return this.visible('.yiiPager li.next a[href]');
+    }
 
-      const numbered = this.allVisible('.yiiPager li.page a[href]')
-        .map((link) => {
-          const url = this.normalizePageUrl(link.getAttribute('href') || link.href);
-          return { url, page: this.pageNumberFromUrl(url) };
-        })
-        .filter((item) => item.url && item.page > currentPage && !visitedPageUrls.has(item.url))
-        .sort((a, b) => a.page - b.page);
-      return numbered[0]?.url || '';
+    nextPageUrl() {
+      const nextLink = this.nextPageLink();
+      return this.normalizePageUrl(nextLink?.getAttribute('href') || nextLink?.href);
+    }
+
+    async waitForResultsPageReady(ctx) {
+      await ctx.logger.info('[qafqazinfo.az] Waiting for page load (timeout 30s)');
+      const previousUrl = this.readPaginationMeta('previousUrl');
+      const expectedUrl = this.readPaginationMeta('expectedUrl');
+      const previousSignature = this.readPaginationMeta('previousSignature');
+      const deadline = Date.now() + 30000;
+      let urlLogged = false;
+      let domLogged = false;
+      let resultsLogged = false;
+      let readySnapshot = null;
+
+      while (Date.now() < deadline) {
+        ctx.token.throwIfCancelled();
+        const currentUrl = this.normalizePageUrl(location.href);
+        const urlChanged = !previousUrl || currentUrl !== previousUrl;
+        if (urlChanged && !urlLogged && (previousUrl || expectedUrl)) {
+          await ctx.logger.info('[qafqazinfo.az] URL changed');
+          urlLogged = true;
+        }
+
+        const domComplete = document.readyState === 'complete';
+        if (domComplete && !domLogged) {
+          await ctx.logger.info('[qafqazinfo.az] DOM fully loaded');
+          domLogged = true;
+        }
+
+        const snapshot = this.resultCandidatesSnapshot();
+        const signature = snapshot.candidates.map((candidate) => candidate.postUrl).join('|');
+        const resultsDetected = snapshot.containerFound && snapshot.candidates.length > 0;
+        const oldCardsGone = !previousSignature || signature !== previousSignature;
+        const expectedReached = !expectedUrl || currentUrl === expectedUrl;
+        if (resultsDetected && !resultsLogged) {
+          await ctx.logger.info('[qafqazinfo.az] Search results detected');
+          resultsLogged = true;
+        }
+
+        if (urlChanged && expectedReached && domComplete && resultsDetected && oldCardsGone) {
+          readySnapshot = snapshot;
+          break;
+        }
+        await app.utils.sleep(500, ctx.token);
+      }
+
+      if (!readySnapshot) {
+        readySnapshot = this.resultCandidatesSnapshot();
+        if (!readySnapshot.candidates.length) await ctx.logger.warn('[qafqazinfo.az] Results page was not ready before timeout');
+      }
+      if (readySnapshot.candidates.length) await ctx.logger.info('[qafqazinfo.az] Results page ready');
+      this.clearPaginationMeta();
+      return readySnapshot;
     }
 
     async moveToNextPage(ctx, visitedPageUrls) {
-      const nextUrl = this.nextPageUrl(visitedPageUrls);
+      const nextLink = this.nextPageLink();
+      if (!nextLink) {
+        await ctx.logger.info('[qafqazinfo.az] Pagination finished');
+        await ctx.logger.info('[qafqazinfo.az] No next page');
+        return { moved: false };
+      }
+      const nextUrl = this.normalizePageUrl(nextLink.getAttribute('href') || nextLink.href);
       if (!nextUrl) {
+        await ctx.logger.info('[qafqazinfo.az] Pagination finished');
         await ctx.logger.info('[qafqazinfo.az] No next page');
         return { moved: false };
       }
       if (visitedPageUrls.has(nextUrl)) {
         await ctx.logger.info('[qafqazinfo.az] Next page already visited; stopping pagination');
+        await ctx.logger.info('[qafqazinfo.az] Pagination finished');
         return { moved: false };
       }
+      if (this.pageNumberFromUrl(nextUrl) <= this.currentPageNumber()) {
+        await ctx.logger.info('[qafqazinfo.az] Next page already visited; stopping pagination');
+        await ctx.logger.info('[qafqazinfo.az] Pagination finished');
+        return { moved: false };
+      }
+      await ctx.logger.info(`[qafqazinfo.az] Next page URL: ${nextUrl}`);
       await ctx.logger.info(`[qafqazinfo.az] Moving to next page: ${nextUrl}`);
-      window.location.assign(nextUrl);
+      await ctx.logger.info('[qafqazinfo.az] Navigating to next page');
+      this.writePaginationMeta('previousUrl', this.normalizePageUrl(location.href));
+      this.writePaginationMeta('expectedUrl', nextUrl);
+      this.writePaginationMeta('previousSignature', this.resultSignature());
+      const beforeUrl = this.normalizePageUrl(location.href);
+      const clicked = await ctx.navigation.click(nextLink, 'qafqazinfo.az next page link');
+      const urlChanged = clicked && await app.utils.waitFor(() => this.normalizePageUrl(location.href) !== beforeUrl, {
+        timeoutMs: 10000,
+        intervalMs: 500,
+        token: ctx.token
+      });
+      if (!urlChanged) {
+        await ctx.logger.warn('[qafqazinfo.az] Next page click did not navigate; using direct URL fallback');
+        window.location.assign(nextUrl);
+      }
       return { moved: true, navigating: true };
     }
 
@@ -364,11 +459,7 @@
     }
 
     async collect(ctx) {
-      await app.utils.waitFor(() => this.resultCandidates().length || this.resultsMatch(ctx.keyword), {
-        timeoutMs: 10000,
-        intervalMs: 300,
-        token: ctx.token
-      });
+      await this.waitForResultsPageReady(ctx);
       const visitedPosts = new Set();
       const visitedPageUrls = new Set();
       while (true) {
@@ -421,6 +512,7 @@
             await ctx.logger.warn('[qafqazinfo.az] Article skipped after scraping error', `${candidate.postUrl}: ${error.message}`);
           }
         }
+        await ctx.logger.info('[qafqazinfo.az] Current page processed');
         const next = await this.moveToNextPage(ctx, visitedPageUrls);
         if (next.navigating) return { navigating: true };
         if (!next.moved) break;
