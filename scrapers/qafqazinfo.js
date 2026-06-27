@@ -321,13 +321,13 @@
 
     async waitForResultsPageReady(ctx) {
       await ctx.logger.info('[qafqazinfo.az] Waiting for page load');
-      await ctx.logger.info('[qafqazinfo.az] Waiting for page load (timeout 30s)');
+      await ctx.logger.info('[qafqazinfo.az] Waiting for page load (timeout 15s)');
       const previousUrl = this.readPaginationMeta('previousUrl');
       const expectedUrl = this.readPaginationMeta('expectedUrl');
       const previousSignature = this.readPaginationMeta('previousSignature');
       const expectedPage = expectedUrl ? this.pageNumberFromUrl(expectedUrl) : 0;
-      const minimumReadyAt = expectedUrl ? Date.now() + 10000 : Date.now();
-      const deadline = Date.now() + 30000;
+      const minimumReadyAt = expectedUrl ? Date.now() + 5000 : Date.now();
+      const deadline = Date.now() + 15000;
       let urlLogged = false;
       let domLogged = false;
       let resultsLogged = false;
@@ -381,8 +381,8 @@
     async waitForClickedPageUpdate(ctx, beforeUrl, beforeSignature, targetPage) {
       await ctx.logger.info('[qafqazinfo.az] Waiting for page load');
       const startedAt = Date.now();
-      const minimumReadyAt = startedAt + 10000;
-      const deadline = startedAt + 30000;
+      const minimumReadyAt = startedAt + 5000;
+      const deadline = startedAt + 15000;
       let urlLogged = false;
       let domLogged = false;
       let resultsLogged = false;
