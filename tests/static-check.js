@@ -15,6 +15,7 @@ assert.ok(scripts.includes('scrapers/media.js'), 'media.az scraper must be a sep
 assert.ok(scripts.includes('scrapers/one-news.js'), '1news.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/haqqin.js'), 'haqqin.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/caliber.js'), 'caliber.az scraper must be a separate content module');
+assert.ok(scripts.includes('scrapers/qafqazinfo.js'), 'qafqazinfo.az scraper must be a separate content module');
 assert.equal(scripts.at(-1), 'content.js');
 assert.ok(manifest.host_permissions.includes('*://oxu.az/*'), 'oxu.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://oxu.az/*'), 'oxu.az content script match is required');
@@ -26,6 +27,8 @@ assert.ok(manifest.host_permissions.includes('*://haqqin.az/*'), 'haqqin.az host
 assert.ok(manifest.content_scripts[0].matches.includes('*://haqqin.az/*'), 'haqqin.az content script match is required');
 assert.ok(manifest.host_permissions.includes('*://caliber.az/*'), 'caliber.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://caliber.az/*'), 'caliber.az content script match is required');
+assert.ok(manifest.host_permissions.includes('*://qafqazinfo.az/*'), 'qafqazinfo.az host permission is required');
+assert.ok(manifest.content_scripts[0].matches.includes('*://qafqazinfo.az/*'), 'qafqazinfo.az content script match is required');
 
 const sourceFiles = [];
 function walk(directory) {
@@ -135,6 +138,21 @@ assert.match(caliberSource, /\.post_cover/);
 assert.match(caliberSource, /app\.parsers\.parseCaliberDate/);
 assert.doesNotMatch(caliberSource, /category:/);
 assert.doesNotMatch(caliberSource, /views:/);
+const qafqazinfoSource = fs.readFileSync(path.join(root, 'scrapers', 'qafqazinfo.js'), 'utf8');
+assert.match(qafqazinfoSource, /source: 'qafqazinfo\.az'/);
+assert.match(qafqazinfoSource, /#frmSearch input\[name="keyword"\]/);
+assert.match(qafqazinfoSource, /news\/search\?keyword=\$\{encodeURIComponent/);
+assert.match(qafqazinfoSource, /a\[href\*="\/news\/detail\/"\]/);
+assert.match(qafqazinfoSource, /h4\.hemcinin, \.hemcinin/);
+assert.match(qafqazinfoSource, /\.yiiPager li\.next a\[href\]/);
+assert.match(qafqazinfoSource, /visitedPageUrls/);
+assert.match(qafqazinfoSource, /news:openArticleTab/);
+assert.match(qafqazinfoSource, /\.panel-body\.news_text p, \.news_text p/);
+assert.match(qafqazinfoSource, /\.news-time time, time\[datetime\]/);
+assert.match(qafqazinfoSource, /\.panel-body > img\.img-responsive\[src\]/);
+assert.match(qafqazinfoSource, /app\.parsers\.parseQafqazinfoDate/);
+assert.doesNotMatch(qafqazinfoSource, /category:/);
+assert.doesNotMatch(qafqazinfoSource, /views:/);
 const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 const contentSource = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
 assert.match(backgroundSource, /news:openArticleTab/);
