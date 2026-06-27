@@ -164,10 +164,68 @@
       return this.mediaUrl(image?.currentSrc || image?.src || image?.getAttribute?.('data-src') || '');
     }
 
+    unsafeSearchArea(element) {
+      return !!element?.closest?.([
+        '.row.toplinks',
+        '.toplinks',
+        'header',
+        'nav',
+        '.navbar',
+        '.navbar-form',
+        '.ad',
+        '.ads',
+        '.banner',
+        '[class*="reklam" i]',
+        '[id*="reklam" i]',
+        '[class*="advert" i]',
+        '[id*="advert" i]'
+      ].join(', '));
+    }
+
+    resultCardRoot(link) {
+      return link?.closest?.('.col-lg-4, .col-md-4, .col-sm-4, .col-xs-12') || link;
+    }
+
+    resultLinks(root) {
+      return this.allVisible('a[href*="/news/detail/"]', root);
+    }
+
+    validSearchResultLink(link) {
+      if (!link || this.unsafeSearchArea(link)) return false;
+      const card = this.resultCardRoot(link);
+      if (!card || this.unsafeSearchArea(card)) return false;
+      return !!link.querySelector('h4.hemcinin, .hemcinin');
+    }
+
+    searchResultContainers() {
+      const rows = this.allVisible('.row')
+        .filter((container) => !this.unsafeSearchArea(container))
+        .filter((container) => this.resultLinks(container).some((link) => this.validSearchResultLink(link)));
+      if (rows.length) return rows;
+
+      return this.allVisible('main, .container, .container-fluid, .panel-body')
+        .filter((container) => !this.unsafeSearchArea(container))
+        .filter((container) => this.resultLinks(container).some((link) => this.validSearchResultLink(link)));
+    }
+
+    ignoredHeaderArticleUrls() {
+      const seen = new Set();
+      const urls = [];
+      document.querySelectorAll('.row.toplinks a[href*="/news/detail/"], .toplinks a[href*="/news/detail/"], header a[href*="/news/detail/"], nav a[href*="/news/detail/"], .navbar a[href*="/news/detail/"]')
+        .forEach((link) => {
+          const postUrl = this.sourceUrl(link.getAttribute('href') || link.href);
+          if (postUrl && !seen.has(postUrl)) {
+            seen.add(postUrl);
+            urls.push(postUrl);
+          }
+        });
+      return urls;
+    }
+
     extractResultCandidate(link, index) {
       const postUrl = this.sourceUrl(link?.getAttribute('href') || link?.href);
       if (!postUrl) return null;
-      const root = link.closest('.col-lg-4, .col-md-4, .col-sm-4, .col-xs-12') || link;
+      const root = this.resultCardRoot(link);
       return {
         index,
         postUrl,
@@ -177,15 +235,33 @@
       };
     }
 
-    resultCandidates() {
+    resultCandidatesSnapshot() {
       const seen = new Set();
-      return this.allVisible('a[href*="/news/detail/"]')
-        .map((link, index) => this.extractResultCandidate(link, index + 1))
-        .filter((candidate) => {
-          if (!candidate || seen.has(candidate.postUrl)) return false;
+      const candidates = [];
+      const skippedHeaderUrls = this.ignoredHeaderArticleUrls();
+      const containers = this.searchResultContainers();
+      for (const container of containers) {
+        for (const link of this.resultLinks(container)) {
+          if (!this.validSearchResultLink(link)) {
+            const postUrl = this.sourceUrl(link.getAttribute('href') || link.href);
+            if (postUrl && this.unsafeSearchArea(link) && !skippedHeaderUrls.includes(postUrl)) skippedHeaderUrls.push(postUrl);
+            continue;
+          }
+          const candidate = this.extractResultCandidate(link, candidates.length + 1);
+          if (!candidate || seen.has(candidate.postUrl)) continue;
           seen.add(candidate.postUrl);
-          return true;
-        });
+          candidates.push(candidate);
+        }
+      }
+      return {
+        candidates,
+        containerFound: containers.length > 0,
+        skippedHeaderUrls: unique(skippedHeaderUrls)
+      };
+    }
+
+    resultCandidates() {
+      return this.resultCandidatesSnapshot().candidates;
     }
 
     currentPageNumber() {
@@ -304,9 +380,20 @@
         }
         visitedPageUrls.add(pageUrl);
         await ctx.logger.info(`[qafqazinfo.az] Results page: ${this.currentPageNumber()}`);
-        const candidates = this.resultCandidates().filter((candidate) => !visitedPosts.has(candidate.postUrl));
+        const snapshot = this.resultCandidatesSnapshot();
+        if (snapshot.containerFound) await ctx.logger.info('[qafqazinfo.az] Search results container found');
+        if (snapshot.skippedHeaderUrls.length) {
+          await ctx.logger.info('[qafqazinfo.az] Header news skipped');
+          for (const postUrl of snapshot.skippedHeaderUrls) {
+            await ctx.logger.info(`[qafqazinfo.az] Ignored header article: ${postUrl}`);
+          }
+        }
+        const candidates = snapshot.candidates.filter((candidate) => !visitedPosts.has(candidate.postUrl));
         await ctx.logger.info(`[qafqazinfo.az] Result cards found: ${candidates.length}`);
         await ctx.logger.info(`[qafqazinfo.az] Cards found: ${candidates.length}`);
+        for (const candidate of candidates) {
+          await ctx.logger.info(`[qafqazinfo.az] Search result accepted: ${candidate.postUrl}`);
+        }
         for (let index = 0; index < candidates.length; index++) {
           ctx.token.throwIfCancelled();
           const candidate = candidates[index];
