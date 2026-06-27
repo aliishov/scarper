@@ -95,6 +95,7 @@
     if (platform === 'haqqin.az') return { domain: 'haqqin.az', url: 'https://haqqin.az/' };
     if (platform === 'caliber.az') return { domain: 'caliber.az', url: 'https://caliber.az/' };
     if (platform === 'qafqazinfo.az') return { domain: 'qafqazinfo.az', url: 'https://qafqazinfo.az/' };
+    if (platform === 'lent.az') return { domain: 'lent.az', url: 'https://lent.az/' };
     return { domain: 'x.com', url: 'https://x.com/explore' };
   }
 
