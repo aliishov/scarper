@@ -3,14 +3,14 @@
 
   const translations = {
     ru: {
-      socialNetwork: 'Социальная сеть', keywords: 'Ключевые слова, каждое с новой строки', maxPosts: 'Ограничить количество постов на слово',
+      socialNetwork: 'Социальная сеть', source: 'Источник', selectSource: 'Выберите источник', keywords: 'Ключевые слова, каждое с новой строки', maxPosts: 'Ограничить количество постов на слово',
       infiniteLoop: 'Бесконечный сбор', dateLimit: 'Не собирать посты старше даты', sendToServer: 'Отправлять посты на сервер',
       saveToPC: 'Сохранять результаты в JSONL на ПК', auth: 'Данные входа используются только в текущей сессии браузера',
       username: 'Логин или email', password: 'Пароль', ready: 'Готов к запуску', start: 'Начать сбор', stop: 'Остановить',
       skip: 'Следующее слово', logs: 'Логи', stopped: 'Остановлено', completed: 'Завершено', running: 'Выполняется'
     },
     az: {
-      socialNetwork: 'Sosial şəbəkə', keywords: 'Açar sözlər, hər biri yeni sətirdə', maxPosts: 'Hər söz üçün post sayını məhdudlaşdır',
+      socialNetwork: 'Sosial şəbəkə', source: 'Mənbə', selectSource: 'Mənbə seçin', keywords: 'Açar sözlər, hər biri yeni sətirdə', maxPosts: 'Hər söz üçün post sayını məhdudlaşdır',
       infiniteLoop: 'Sonsuz toplama', dateLimit: 'Bu tarixdən köhnə postları toplama', sendToServer: 'Postları serverə göndər',
       saveToPC: 'Nəticələri JSONL kimi kompüterə yaz', auth: 'Giriş məlumatları yalnız cari brauzer sessiyasında istifadə olunur',
       username: 'Login və ya email', password: 'Şifrə', ready: 'Başlamağa hazırdır', start: 'Toplamağa başla', stop: 'Dayandır',
@@ -20,10 +20,14 @@
 
   const elements = Object.fromEntries([
     'langSelect', 'platform', 'keywords', 'limitCountToggle', 'count', 'infiniteLoopToggle', 'dateLimitToggle', 'dateLimit',
-    'datePicker', 'sendToServerToggle', 'saveToPCToggle', 'authUsername', 'authPassword', 'error', 'status', 'start', 'stop', 'skip', 'logs'
+    'datePicker', 'sendToServerToggle', 'saveToPCToggle', 'authFields', 'authUsername', 'authPassword', 'error', 'status', 'start', 'stop', 'skip', 'logs'
   ].map((id) => [id, document.getElementById(id)]));
+  const SOCIAL_SOURCES = new Set(['twitter', 'instagram', 'facebook', 'tiktok']);
+  const NEWS_SOURCES = new Set(['oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']);
   let language = localStorage.getItem('scraperLanguage') || 'ru';
   let currentState = null;
+  let selectedSource = null;
+  const popupLogs = [];
 
   function applyTranslations() {
     elements.langSelect.value = language;
@@ -37,6 +41,43 @@
   function showError(message = '') {
     elements.error.textContent = message;
     elements.error.style.display = message ? 'block' : 'none';
+  }
+
+  function popupLogEntry(message, level = 'info') {
+    return {
+      timestamp: new Date().toISOString(),
+      platform: 'popup',
+      level,
+      message: String(message || '').replace(/^\[popup\]\s*/, ''),
+      details: ''
+    };
+  }
+
+  function debugPopup(message, level = 'info') {
+    console[level === 'warn' ? 'warn' : 'log'](message);
+    popupLogs.push(popupLogEntry(message, level));
+    if (!currentState?.active) renderLogs(popupLogs);
+  }
+
+  function sourceType(source) {
+    if (!source) return 'none';
+    if (SOCIAL_SOURCES.has(source)) return 'social';
+    if (NEWS_SOURCES.has(source)) return 'news';
+    return 'unknown';
+  }
+
+  function updateSourceUi(reason = 'init') {
+    selectedSource = elements.platform.value || null;
+    const type = sourceType(selectedSource);
+    const showLogin = type === 'social';
+    elements.authFields.hidden = !showLogin;
+    if (!showLogin) showError();
+    if (reason === 'change') {
+      debugPopup(`[popup] Source changed: ${selectedSource || 'none'}`);
+      debugPopup(`[popup] Source type: ${type}`);
+      debugPopup(showLogin ? '[popup] Login section shown' : '[popup] Login section hidden');
+    }
+    return { source: selectedSource, type };
   }
 
   function renderLogs(logs = []) {
@@ -66,10 +107,14 @@
     else if (active) elements.status.textContent = `${translations[language].running}: ${state.currentKeyword} (${state.stats?.currentKeyword || 0}${state.targetCount === -1 ? '' : `/${state.targetCount}`})`;
     else if (state.phase === 'completed' || state.phase === 'completed_with_errors') elements.status.textContent = `${translations[language].completed}: ${state.stats?.total || 0}`;
     else elements.status.textContent = `${translations[language].stopped}: ${state.phase || ''}`;
-    renderLogs(state?.logs || []);
+    renderLogs(state?.logs || popupLogs);
   }
 
   function validateForm() {
+    const source = elements.platform.value || '';
+    const type = sourceType(source);
+    if (!source) throw new Error(language === 'ru' ? 'Выберите источник для сбора' : 'Toplamaq üçün mənbə seçin');
+    if (type === 'unknown') throw new Error(`Unsupported source: ${source}`);
     const keywords = elements.keywords.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
     if (!keywords.length) throw new Error(language === 'ru' ? 'Введите хотя бы одно ключевое слово.' : 'Ən azı bir açar söz daxil edin.');
     let targetCount = -1;
@@ -82,7 +127,8 @@
     }
     const parsedDate = elements.dateLimitToggle.checked ? app.utils.parseUserDate(elements.dateLimit.value) : { value: null, error: null };
     if (parsedDate.error) throw new Error(parsedDate.error);
-    return { keywords, targetCount, dateLimit: parsedDate.value };
+    debugPopup(`[popup] Start validation passed for ${type} source`);
+    return { source, sourceType: type, keywords, targetCount, dateLimit: parsedDate.value };
   }
 
   function platformTarget(platform) {
@@ -112,7 +158,7 @@
     try {
       const form = validateForm();
       const tab = await activeTab();
-      const platform = elements.platform.value;
+      const platform = form.source;
       const runId = crypto.randomUUID();
       const state = {
         version: app.VERSION,
@@ -131,12 +177,15 @@
         sendToServer: elements.sendToServerToggle.checked,
         saveToPC: elements.saveToPCToggle.checked,
         stats: { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
-        logs: [{ timestamp: new Date().toISOString(), platform, level: 'info', message: `Run created. First keyword: ${form.keywords[0]}`, details: '' }],
+        logs: [
+          popupLogEntry(`[popup] Start validation passed for ${form.sourceType} source`),
+          { timestamp: new Date().toISOString(), platform, level: 'info', message: `Run created. First keyword: ${form.keywords[0]}`, details: '' }
+        ],
         createdAt: new Date().toISOString()
       };
-      const secrets = {
+      const secrets = form.sourceType === 'social' ? {
         [platform]: { username: elements.authUsername.value.trim(), password: elements.authPassword.value }
-      };
+      } : {};
       await app.storage.initialize(state, secrets);
       render(state);
 
@@ -185,6 +234,7 @@
     }
   });
 
+  elements.platform.addEventListener('change', () => updateSourceUi('change'));
   elements.limitCountToggle.addEventListener('change', () => { elements.count.disabled = !elements.limitCountToggle.checked; });
   elements.dateLimitToggle.addEventListener('change', () => {
     const disabled = !elements.dateLimitToggle.checked;
@@ -218,6 +268,11 @@
     if (area === 'local' && changes[app.constants.STATE_KEY]) render(changes[app.constants.STATE_KEY].newValue);
   });
 
+  elements.platform.value = '';
+  selectedSource = null;
+  elements.sendToServerToggle.checked = false;
   applyTranslations();
+  debugPopup('[popup] sendToServer default: false');
+  updateSourceUi();
   app.storage.getState().then(render).catch((error) => showError(error.message));
 })(globalThis.ScraperApp);
