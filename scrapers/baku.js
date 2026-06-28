@@ -149,8 +149,64 @@
       return this.visible('form.custom-navbar-search-block.open input[name="query"], form[action*="/search"] input[name="query"], input[name="query"]');
     }
 
-    searchSubmit(input) {
-      return input?.closest('form')?.querySelector('button[type="submit"], button') || null;
+    isCloseSearchButton(button) {
+      return !!button?.matches?.('button.close, button[type="button"], .search-block-icons .close, .close')
+        || !!button?.closest?.('.close');
+    }
+
+    safeSearchSubmit(input) {
+      const form = input?.closest('form');
+      if (!form) return null;
+      return Array.from(form.querySelectorAll('button:not(.close):not([type="button"])'))
+        .find((button) => app.utils.isVisible(button) && !this.isCloseSearchButton(button)) || null;
+    }
+
+    dispatchNativeEnter(input) {
+      input.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+        cancelable: true
+      }));
+      input.dispatchEvent(new KeyboardEvent('keyup', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+        cancelable: true
+      }));
+    }
+
+    async submitSearchForm(input, keyword, ctx) {
+      const form = input?.closest('form');
+      if (!form) return false;
+      const closeButton = form.querySelector('button.close, button[type="button"], .search-block-icons .close');
+      if (closeButton) await ctx.logger.info('[baku.ws] Close button detected; not clicking it');
+      const safeButton = this.safeSearchSubmit(input);
+      if (safeButton && this.isCloseSearchButton(safeButton)) {
+        await ctx.logger.info('[baku.ws] Close button detected; not clicking it');
+      }
+      if (typeof form.requestSubmit === 'function') {
+        await ctx.logger.info('[baku.ws] Submitting search form with requestSubmit');
+        try {
+          form.requestSubmit();
+          await ctx.logger.info('[baku.ws] Search form submitted');
+        } catch (error) {
+          await ctx.logger.warn('[baku.ws] requestSubmit failed', error.message);
+          return false;
+        }
+      } else {
+        this.dispatchNativeEnter(input);
+        await ctx.logger.info('[baku.ws] Search form submitted');
+      }
+      return !!(await app.utils.waitFor(() => this.resultsMatch(keyword), {
+        timeoutMs: 8000,
+        intervalMs: 300,
+        token: ctx.token
+      }));
     }
 
     async search(keyword, ctx) {
@@ -195,23 +251,8 @@
         await ctx.logger.info('[baku.ws] Keyword typed');
         let submitted = await ctx.navigation.pressEnter(input, () => this.resultsMatch(keyword), 'baku.ws search input');
         if (!submitted) {
-          const submit = this.searchSubmit(input);
-          if (submit) submitted = await ctx.navigation.click(submit, 'baku.ws search submit');
-          if (!submitted) {
-            const form = input.closest('form');
-            if (form) {
-              if (typeof form.requestSubmit === 'function') form.requestSubmit();
-              else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-              submitted = true;
-            }
-          }
-          if (submitted) {
-            submitted = !!(await app.utils.waitFor(() => this.resultsMatch(keyword), {
-              timeoutMs: 8000,
-              intervalMs: 300,
-              token: ctx.token
-            }));
-          }
+          await ctx.logger.info('[baku.ws] Enter did not confirm search');
+          submitted = await this.submitSearchForm(input, keyword, ctx);
         }
         if (submitted || this.resultsMatch(keyword)) {
           await ctx.logger.info('[baku.ws] Search submitted');
@@ -221,7 +262,7 @@
       }
 
       const fallbackUrl = this.searchUrl(keyword);
-      await ctx.logger.warn('[baku.ws] UI search failed; using fallback URL', fallbackUrl);
+      await ctx.logger.warn('[baku.ws] Search submit failed; using fallback URL', fallbackUrl);
       window.location.assign(fallbackUrl);
       return { success: false, navigating: true };
     }
