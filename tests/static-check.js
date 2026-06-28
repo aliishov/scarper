@@ -17,6 +17,7 @@ assert.ok(scripts.includes('scrapers/haqqin.js'), 'haqqin.az scraper must be a s
 assert.ok(scripts.includes('scrapers/caliber.js'), 'caliber.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/qafqazinfo.js'), 'qafqazinfo.az scraper must be a separate content module');
 assert.ok(scripts.includes('scrapers/lent.js'), 'lent.az scraper must be a separate content module');
+assert.ok(scripts.includes('scrapers/baku.js'), 'baku.ws scraper must be a separate content module');
 assert.equal(scripts.at(-1), 'content.js');
 assert.ok(manifest.host_permissions.includes('*://oxu.az/*'), 'oxu.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://oxu.az/*'), 'oxu.az content script match is required');
@@ -32,6 +33,8 @@ assert.ok(manifest.host_permissions.includes('*://qafqazinfo.az/*'), 'qafqazinfo
 assert.ok(manifest.content_scripts[0].matches.includes('*://qafqazinfo.az/*'), 'qafqazinfo.az content script match is required');
 assert.ok(manifest.host_permissions.includes('*://lent.az/*'), 'lent.az host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://lent.az/*'), 'lent.az content script match is required');
+assert.ok(manifest.host_permissions.includes('*://baku.ws/*'), 'baku.ws host permission is required');
+assert.ok(manifest.content_scripts[0].matches.includes('*://baku.ws/*'), 'baku.ws content script match is required');
 
 const sourceFiles = [];
 function walk(directory) {
@@ -209,6 +212,29 @@ assert.match(lentSource, /app\.parsers\.parseLentDate/);
 assert.match(lentSource, /app\.parsers\.lentSearchType/);
 assert.doesNotMatch(lentSource, /category:/);
 assert.doesNotMatch(lentSource, /views:/);
+const bakuSource = fs.readFileSync(path.join(root, 'scrapers', 'baku.js'), 'utf8');
+assert.match(bakuSource, /source: 'baku\.ws'/);
+assert.match(bakuSource, /search-normal/);
+assert.match(bakuSource, /\.svg-icon\.normal/);
+assert.match(bakuSource, /input\[name="query"\]/);
+assert.match(bakuSource, /search\?query=\$\{encodeURIComponent/);
+assert.match(bakuSource, /\.post-item, \.rt-news-item\[data-url\], \.post-item-content\[data-url\]/);
+assert.match(bakuSource, /\.cat-left-bnr, \[class\*="bnr"\], \[class\*="banner"\]/);
+assert.match(bakuSource, /Ad\/banner skipped/);
+assert.match(bakuSource, /Scrolling for more results/);
+assert.match(bakuSource, /No more result cards after retries/);
+assert.match(bakuSource, /news:openArticleTab/);
+assert.match(bakuSource, /\.post-detail-content\.resize-area p, \.post-detail-content p, \.resize-area p/);
+assert.match(bakuSource, /\.post-date-day/);
+assert.match(bakuSource, /\.post-date-month/);
+assert.match(bakuSource, /\.post-date-year/);
+assert.match(bakuSource, /\.post-date-time/);
+assert.match(bakuSource, /\.post-detail-img img\[src\], \.post-detail-content img\[src\]/);
+assert.match(bakuSource, /app\.parsers\.parseBakuWsDate/);
+assert.doesNotMatch(bakuSource, /category:/);
+assert.doesNotMatch(bakuSource, /views:/);
+assert.doesNotMatch(bakuSource, /likes:/);
+assert.doesNotMatch(bakuSource, /dislikes:/);
 const backgroundSource = fs.readFileSync(path.join(root, 'background.js'), 'utf8');
 const contentSource = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
 assert.match(backgroundSource, /news:openArticleTab/);
