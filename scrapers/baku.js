@@ -136,8 +136,9 @@
     searchIcon() {
       const candidates = Array.from(document.querySelectorAll('svg use, .svg-icon.normal'));
       const seed = candidates.find((element) => {
-        if (element.matches?.('.svg-icon.normal')) return true;
-        const href = `${element.getAttribute('href') || ''} ${element.getAttribute('xlink:href') || ''} ${element.href?.baseVal || ''}`;
+        if (element.matches?.('.svg-icon.normal') && element.closest('.custom-navbar-search-toggle, .search-toggle')) return true;
+        const use = element.matches?.('.svg-icon.normal') ? element.querySelector('use') : element;
+        const href = `${use?.getAttribute('href') || ''} ${use?.getAttribute('xlink:href') || ''} ${use?.href?.baseVal || ''}`;
         return href.includes('search-normal');
       });
       const icon = seed?.closest?.('svg') || seed;
