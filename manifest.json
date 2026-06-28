@@ -34,6 +34,8 @@
     "*://www.qafqazinfo.az/*",
     "*://lent.az/*",
     "*://www.lent.az/*",
+    "*://baku.ws/*",
+    "*://www.baku.ws/*",
     "http://localhost/*"
   ],
   "background": {
@@ -69,7 +71,9 @@
         "*://qafqazinfo.az/*",
         "*://www.qafqazinfo.az/*",
         "*://lent.az/*",
-        "*://www.lent.az/*"
+        "*://www.lent.az/*",
+        "*://baku.ws/*",
+        "*://www.baku.ws/*"
       ],
       "js": [
         "core/namespace.js",
@@ -91,6 +95,7 @@
         "scrapers/caliber.js",
         "scrapers/qafqazinfo.js",
         "scrapers/lent.js",
+        "scrapers/baku.js",
         "core/state-machine.js",
         "content.js"
       ],

@@ -39,7 +39,8 @@ for (const file of [
   'scrapers/haqqin.js',
   'scrapers/caliber.js',
   'scrapers/qafqazinfo.js',
-  'scrapers/lent.js'
+  'scrapers/lent.js',
+  'scrapers/baku.js'
 ]) {
   require(path.join(root, file));
 }
@@ -71,6 +72,7 @@ test('result filename follows source_result_DD_MM_YYYY.jsonl', () => {
   assert.equal(app.utils.buildFilename('caliber.az', new Date(2026, 5, 25)), 'caliber.az_result_25_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('qafqazinfo.az', new Date(2026, 5, 25)), 'qafqazinfo.az_result_25_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('lent.az', new Date(2026, 5, 25)), 'lent.az_result_25_06_2026.jsonl');
+  assert.equal(app.utils.buildFilename('baku.ws', new Date(2026, 5, 25)), 'baku.ws_result_25_06_2026.jsonl');
 });
 
 test('Facebook parses absolute tooltip date without replacing it with now', () => {
@@ -382,6 +384,23 @@ test('Lent.az parses publication dates and selects search type', () => {
   assert.equal(app.parsers.lentSearchType('2025-01-01', now), '4');
 });
 
+test('Baku.ws parses article and preview publication dates in local timezone', () => {
+  assert.equal(
+    app.parsers.parseBakuWsDate({ day: '27', month: 'iyn', year: '2026', time: '21:41' }),
+    app.utils.formatTimestamp(new Date(2026, 5, 27, 21, 41, 0))
+  );
+  assert.equal(
+    app.parsers.parseBakuWsDate('27 iyun 2026 21:41'),
+    app.utils.formatTimestamp(new Date(2026, 5, 27, 21, 41, 0))
+  );
+  assert.equal(
+    app.parsers.parseBakuWsDate('21:41 27 iyn 2026'),
+    app.utils.formatTimestamp(new Date(2026, 5, 27, 21, 41, 0))
+  );
+  assert.equal(app.parsers.parseBakuWsDate('31 fev 2026 21:41'), null);
+  assert.equal(app.parsers.parseBakuWsDate('bad date'), null);
+});
+
 test('News payload never exposes title or category', () => {
   const normalized = app.utils.normalizePost({
     postDate: '2026-06-25T12:02:00+04:00',
@@ -463,7 +482,7 @@ test('all platform scrapers implement the shared public contract', () => {
     'ensureReady', 'searchKeyword', 'scrapePosts', 'parsePost', 'expandPostText',
     'parsePostDate', 'shouldSkipPost', 'stop', 'cleanup'
   ];
-  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az']) {
+  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']) {
     for (const method of methods) {
       assert.equal(typeof app.scrapers[platform][method], 'function', `${platform}.${method} must exist`);
     }
