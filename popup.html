@@ -41,20 +41,25 @@
     </select>
   </header>
 
-  <label for="platform" data-i18n="socialNetwork">Социальная сеть</label>
+  <label for="platform" data-i18n="source">Источник</label>
   <select id="platform">
-    <option value="twitter">X (Twitter)</option>
-    <option value="facebook">Facebook</option>
-    <option value="instagram">Instagram</option>
-    <option value="tiktok">TikTok</option>
-    <option value="oxu.az">Oxu.az</option>
-    <option value="media.az">Media.az</option>
-    <option value="1news.az">1news.az</option>
-    <option value="haqqin.az">Haqqin.az</option>
-    <option value="caliber.az">Caliber.az</option>
-    <option value="qafqazinfo.az">Qafqazinfo.az</option>
-    <option value="lent.az">Lent.az</option>
-    <option value="baku.ws">Baku.ws</option>
+    <option value="" selected data-i18n="selectSource">Выберите источник</option>
+    <optgroup label="Соцсети">
+      <option value="twitter">X (Twitter)</option>
+      <option value="facebook">Facebook</option>
+      <option value="instagram">Instagram</option>
+      <option value="tiktok">TikTok</option>
+    </optgroup>
+    <optgroup label="Новостные сайты">
+      <option value="oxu.az">Oxu.az</option>
+      <option value="media.az">Media.az</option>
+      <option value="1news.az">1news.az</option>
+      <option value="haqqin.az">Haqqin.az</option>
+      <option value="caliber.az">Caliber.az</option>
+      <option value="qafqazinfo.az">Qafqazinfo.az</option>
+      <option value="lent.az">Lent.az</option>
+      <option value="baku.ws">Baku.ws</option>
+    </optgroup>
   </select>
 
   <label for="keywords" data-i18n="keywords">Ключевые слова, каждое с новой строки</label>
@@ -70,10 +75,10 @@
     <input type="date" id="datePicker" aria-label="Выбрать дату в календаре" title="Выбрать дату в календаре" disabled>
   </div>
 
-  <label class="check"><input type="checkbox" id="sendToServerToggle" checked><span data-i18n="sendToServer">Отправлять посты на сервер</span></label>
+  <label class="check"><input type="checkbox" id="sendToServerToggle"><span data-i18n="sendToServer">Отправлять посты на сервер</span></label>
   <label class="check"><input type="checkbox" id="saveToPCToggle" checked><span data-i18n="saveToPC">Сохранять результаты в JSONL на ПК</span></label>
 
-  <section id="authFields" class="auth">
+  <section id="authFields" class="auth" hidden>
     <div class="muted" data-i18n="auth">Данные входа используются только в текущей сессии браузера</div>
     <label for="authUsername" data-i18n="username">Логин или email</label>
     <input type="text" id="authUsername" autocomplete="off">
