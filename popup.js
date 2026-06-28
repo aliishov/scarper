@@ -96,6 +96,7 @@
     if (platform === 'caliber.az') return { domain: 'caliber.az', url: 'https://caliber.az/' };
     if (platform === 'qafqazinfo.az') return { domain: 'qafqazinfo.az', url: 'https://qafqazinfo.az/' };
     if (platform === 'lent.az') return { domain: 'lent.az', url: 'https://lent.az/' };
+    if (platform === 'baku.ws') return { domain: 'baku.ws', url: 'https://baku.ws/' };
     return { domain: 'x.com', url: 'https://x.com/explore' };
   }
 
