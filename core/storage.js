@@ -21,6 +21,9 @@
     async patch(runId, patch) {
       return (await send('state:patch', { runId, patch })).state;
     },
+    async patchSource(runId, source, patch, statsDelta = {}) {
+      return (await send('state:patchSource', { runId, source, patch, statsDelta })).state;
+    },
     async log(runId, entry) {
       return (await send('state:log', { runId, entry })).state;
     },
@@ -73,6 +76,30 @@
             updatedAt: new Date().toISOString()
           };
           return write(next);
+        });
+      },
+      patchSource(runId, source, patch = {}, statsDelta = {}) {
+        return exclusive(async () => {
+          const current = await read();
+          if (!current || current.runId !== runId) return null;
+          const sourceStates = { ...(current.sourceStates || {}) };
+          const previous = sourceStates[source] || {};
+          sourceStates[source] = {
+            ...previous,
+            ...patch,
+            stats: patch.stats ? { ...(previous.stats || {}), ...patch.stats } : previous.stats
+          };
+          const stats = { ...(current.stats || {}) };
+          for (const [field, delta] of Object.entries(statsDelta || {})) {
+            stats[field] = Number(stats[field] || 0) + Number(delta || 0);
+          }
+          return write({
+            ...current,
+            sourceStates,
+            stats,
+            revision: (current.revision || 0) + 1,
+            updatedAt: new Date().toISOString()
+          });
         });
       },
       appendLog(runId, entry) {
