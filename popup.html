@@ -41,26 +41,36 @@
     </select>
   </header>
 
-  <label for="platform" data-i18n="source">Источник</label>
-  <select id="platform">
-    <option value="" selected data-i18n="selectSource">Выберите источник</option>
-    <optgroup label="Соцсети">
-      <option value="twitter">X (Twitter)</option>
-      <option value="facebook">Facebook</option>
-      <option value="instagram">Instagram</option>
-      <option value="tiktok">TikTok</option>
-    </optgroup>
-    <optgroup label="Новостные сайты">
-      <option value="oxu.az">Oxu.az</option>
-      <option value="media.az">Media.az</option>
-      <option value="1news.az">1news.az</option>
-      <option value="haqqin.az">Haqqin.az</option>
-      <option value="caliber.az">Caliber.az</option>
-      <option value="qafqazinfo.az">Qafqazinfo.az</option>
-      <option value="lent.az">Lent.az</option>
-      <option value="baku.ws">Baku.ws</option>
-    </optgroup>
+  <label for="scrapingMode" data-i18n="scrapingMode">Режим scraping</label>
+  <select id="scrapingMode">
+    <option value="single" selected data-i18n="modeSingle">Режим одиночного скрапинга</option>
+    <option value="mixed_social" data-i18n="modeMixedSocial">Режим множественного скрапинга соцсетей</option>
+    <option value="mixed_news" data-i18n="modeMixedNews">Режим множественного скрапинга новостных каналов</option>
+    <option value="full" data-i18n="modeFull">Режим полного скрапинга</option>
   </select>
+
+  <section id="singleSourceFields">
+    <label for="platform" data-i18n="source">Источник</label>
+    <select id="platform">
+      <option value="" selected data-i18n="selectSource">Выберите источник</option>
+      <optgroup label="Соцсети">
+        <option value="twitter">X (Twitter)</option>
+        <option value="facebook">Facebook</option>
+        <option value="instagram">Instagram</option>
+        <option value="tiktok">TikTok</option>
+      </optgroup>
+      <optgroup label="Новостные сайты">
+        <option value="oxu.az">Oxu.az</option>
+        <option value="media.az">Media.az</option>
+        <option value="1news.az">1news.az</option>
+        <option value="haqqin.az">Haqqin.az</option>
+        <option value="caliber.az">Caliber.az</option>
+        <option value="qafqazinfo.az">Qafqazinfo.az</option>
+        <option value="lent.az">Lent.az</option>
+        <option value="baku.ws">Baku.ws</option>
+      </optgroup>
+    </select>
+  </section>
 
   <label for="keywords" data-i18n="keywords">Ключевые слова, каждое с новой строки</label>
   <textarea id="keywords" placeholder="Messi&#10;FIFA"></textarea>
@@ -84,6 +94,29 @@
     <input type="text" id="authUsername" autocomplete="off">
     <label for="authPassword" data-i18n="password">Пароль</label>
     <input type="password" id="authPassword" autocomplete="new-password">
+  </section>
+
+  <section id="multiAuthFields" class="auth" hidden>
+    <div class="muted" data-i18n="multiAuth">Данные входа для соцсетей используются только в текущей сессии браузера</div>
+    <label for="facebookUsername">Facebook login</label>
+    <input type="text" id="facebookUsername" data-credential-source="facebook" data-credential-field="username" autocomplete="off">
+    <label for="facebookPassword">Facebook password</label>
+    <input type="password" id="facebookPassword" data-credential-source="facebook" data-credential-field="password" autocomplete="new-password">
+
+    <label for="twitterUsername">Twitter login</label>
+    <input type="text" id="twitterUsername" data-credential-source="twitter" data-credential-field="username" autocomplete="off">
+    <label for="twitterPassword">Twitter password</label>
+    <input type="password" id="twitterPassword" data-credential-source="twitter" data-credential-field="password" autocomplete="new-password">
+
+    <label for="instagramUsername">Instagram login</label>
+    <input type="text" id="instagramUsername" data-credential-source="instagram" data-credential-field="username" autocomplete="off">
+    <label for="instagramPassword">Instagram password</label>
+    <input type="password" id="instagramPassword" data-credential-source="instagram" data-credential-field="password" autocomplete="new-password">
+
+    <label for="tiktokUsername">TikTok login</label>
+    <input type="text" id="tiktokUsername" data-credential-source="tiktok" data-credential-field="username" autocomplete="off">
+    <label for="tiktokPassword">TikTok password</label>
+    <input type="password" id="tiktokPassword" data-credential-source="tiktok" data-credential-field="password" autocomplete="new-password">
   </section>
 
   <div id="error" role="alert"></div>
