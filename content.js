@@ -7,7 +7,7 @@
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (!request?.action) return false;
     if (request.action === 'scraper:start' || request.action === 'scraper:resume') {
-      controller.start(request.runId, request.credentials || {});
+      controller.start(request.runId, request.credentials || {}, { source: request.source || '' });
       sendResponse({ success: true });
       return false;
     }
