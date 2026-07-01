@@ -73,6 +73,27 @@ test('result filename follows source_result_DD_MM_YYYY.jsonl', () => {
   assert.equal(app.utils.buildFilename('qafqazinfo.az', new Date(2026, 5, 25)), 'qafqazinfo.az_result_25_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('lent.az', new Date(2026, 5, 25)), 'lent.az_result_25_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('baku.ws', new Date(2026, 5, 25)), 'baku.ws_result_25_06_2026.jsonl');
+  assert.equal(app.utils.buildFilename('mixed_social_media', new Date(2026, 5, 25)), 'mixed_social_media_result_25_06_2026.jsonl');
+  assert.equal(app.utils.buildFilename('mixed_news', new Date(2026, 5, 25)), 'mixed_news_result_25_06_2026.jsonl');
+  assert.equal(app.utils.buildFilename('mixed', new Date(2026, 5, 25)), 'mixed_result_25_06_2026.jsonl');
+});
+
+test('scraping mode helpers resolve sources and mixed filenames', () => {
+  assert.deepEqual(app.utils.SOCIAL_SOURCES, ['facebook', 'twitter', 'instagram', 'tiktok']);
+  assert.deepEqual(app.utils.NEWS_SOURCES, ['oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']);
+  assert.equal(app.utils.sourceType('facebook'), 'social');
+  assert.equal(app.utils.sourceType('baku.ws'), 'news');
+  assert.equal(app.utils.sourceType(''), 'none');
+  assert.equal(app.utils.isMultiMode('mixed_social'), true);
+  assert.equal(app.utils.isMultiMode('single'), false);
+  assert.deepEqual(app.utils.sourcesForMode('single', 'media.az'), ['media.az']);
+  assert.deepEqual(app.utils.sourcesForMode('mixed_social'), app.utils.SOCIAL_SOURCES);
+  assert.deepEqual(app.utils.sourcesForMode('mixed_news'), app.utils.NEWS_SOURCES);
+  assert.deepEqual(app.utils.sourcesForMode('full'), [...app.utils.SOCIAL_SOURCES, ...app.utils.NEWS_SOURCES]);
+  assert.equal(app.utils.filenameSourceForMode('single', 'media.az'), 'media.az');
+  assert.equal(app.utils.filenameSourceForMode('mixed_social'), 'mixed_social_media');
+  assert.equal(app.utils.filenameSourceForMode('mixed_news'), 'mixed_news');
+  assert.equal(app.utils.filenameSourceForMode('full'), 'mixed');
 });
 
 test('Facebook parses absolute tooltip date without replacing it with now', () => {
@@ -475,6 +496,28 @@ test('state repository serializes concurrent writes and rejects stale runs', asy
   assert.equal(state.logs.length, 50);
   assert.equal(state.revision, 52);
   assert.equal(await repository.patch('stale-run', { active: true }), null);
+});
+
+test('state repository patches source state atomically for multi runs', async () => {
+  const repository = app.createStateRepository();
+  const runId = 'run-multi';
+  await repository.initialize({
+    runId,
+    active: true,
+    stats: { total: 0, duplicates: 0, errors: 0 },
+    sourceStates: {
+      'baku.ws': { phase: 'starting', stats: { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 } }
+    }
+  });
+  await repository.patchSource(runId, 'baku.ws', {
+    phase: 'scraping',
+    stats: { currentKeyword: 2, total: 2 }
+  }, { total: 2 });
+  const state = await repository.get();
+  assert.equal(state.sourceStates['baku.ws'].phase, 'scraping');
+  assert.equal(state.sourceStates['baku.ws'].stats.currentKeyword, 2);
+  assert.equal(state.sourceStates['baku.ws'].stats.total, 2);
+  assert.equal(state.stats.total, 2);
 });
 
 test('all platform scrapers implement the shared public contract', () => {
