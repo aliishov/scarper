@@ -57,6 +57,11 @@ function targetForSource(source) {
   return targets[source] || null;
 }
 
+function credentialsForSource(credentials, source) {
+  if (!app.utils.SOCIAL_SOURCES.includes(source)) return {};
+  return { [source]: { ...(credentials?.[source] || {}) } };
+}
+
 async function sendToOwner(state, action) {
   if (!state?.ownerTabId) return false;
   const credentials = await stateRepository.getSecrets(state.runId);
@@ -140,6 +145,12 @@ function removeTab(tabId) {
   });
 }
 
+function reloadTab(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.reload(tabId, () => resolve(!chrome.runtime.lastError));
+  });
+}
+
 function sendTabMessage(tabId, message) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {
@@ -186,9 +197,9 @@ async function sendArticleExtractMessage(runId, tabId, source, preview) {
   throw lastError || new Error('Article extractor did not respond');
 }
 
-async function sendScraperCommandWithRetry(runId, tabId, message, label) {
+async function sendScraperCommandWithRetry(runId, tabId, message, label, maxAttempts = 3) {
   let lastError = null;
-  for (let attempt = 1; attempt <= 12; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await assertRunCanContinue(runId);
     try {
       const response = await sendTabMessage(tabId, message);
@@ -196,7 +207,7 @@ async function sendScraperCommandWithRetry(runId, tabId, message, label) {
       return response;
     } catch (error) {
       lastError = error;
-      await app.utils.sleep(400);
+      await app.utils.sleep(750);
     }
   }
   throw lastError || new Error(`${label} did not respond`);
@@ -283,6 +294,7 @@ class MultiWindowOrchestrator {
         tabs: new Map(),
         windows: new Map(),
         progress: new Map(),
+        reloads: new Map(),
         watchdogs: new Map(),
         finishing: false
       });
@@ -318,13 +330,78 @@ class MultiWindowOrchestrator {
         if (Date.now() - lastProgressAt < 60000) return;
         const windowId = currentEntry.windows.get(source);
         const tabId = currentEntry.tabs.get(source);
-        await appendLog(runId, 'warn', `[orchestrator] Watchdog focusing source window: ${source}`);
+        await appendLog(runId, 'warn', `[orchestrator] Source stuck detected: ${source} no progress 60s`);
         await focusWindow(windowId);
         if (tabId) await activateTab(tabId);
-        currentEntry.progress.set(source, Date.now());
+        await this.handleStuckSource(runId, source, tabId);
       })().catch(console.error);
     }, 30000);
     entry.watchdogs.set(source, watchdog);
+  }
+
+  async requestSourceStatus(runId, source, tabId) {
+    await appendLog(runId, 'info', '[orchestrator] Requesting source status', source);
+    const state = await stateRepository.get();
+    const sourceRunId = state?.sourceTabs?.[source]?.sourceRunId || this.sourceRunId(runId, source);
+    const response = await sendTabMessage(tabId, {
+      action: 'GET_SOURCE_STATUS',
+      type: 'GET_SOURCE_STATUS',
+      parentRunId: runId,
+      runId,
+      sourceRunId,
+      source
+    });
+    if (!response?.success) throw new Error(response?.error || 'Source status was not returned');
+    return response.status || {};
+  }
+
+  async forceSourceScraping(runId, source, tabId) {
+    const state = await stateRepository.get();
+    const sourceRunId = state?.sourceTabs?.[source]?.sourceRunId || this.sourceRunId(runId, source);
+    await appendLog(runId, 'warn', '[orchestrator] Forcing transition searching -> scraping', source);
+    await stateRepository.patchSource(runId, source, {
+      phase: 'scraping',
+      forcedScrapingAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString()
+    });
+    await sendTabMessage(tabId, {
+      action: 'FORCE_SOURCE_SCRAPING',
+      type: 'FORCE_SOURCE_SCRAPING',
+      parentRunId: runId,
+      runId,
+      sourceRunId,
+      source
+    }).catch(() => null);
+    const latest = await stateRepository.get();
+    await this.resumeTab(latest, tabId);
+  }
+
+  async handleStuckSource(runId, source, tabId) {
+    const entry = this.runs.get(runId);
+    try {
+      const status = await this.requestSourceStatus(runId, source, tabId);
+      if (status.phase === 'searching') {
+        await this.forceSourceScraping(runId, source, tabId);
+        return;
+      }
+      entry?.progress.set(source, Date.now());
+    } catch (error) {
+      const reloads = Number(entry?.reloads.get(source) || 0);
+      if (reloads < 1) {
+        await appendLog(runId, 'warn', `[orchestrator] Source status unavailable; reloading source tab once: ${source}`, error.message);
+        entry?.reloads.set(source, reloads + 1);
+        await reloadTab(tabId);
+        entry?.progress.set(source, Date.now());
+        return;
+      }
+      await appendLog(runId, 'error', `[orchestrator] Source failed: ${source} error=No status after reload`);
+      await stateRepository.patchSource(runId, source, {
+        active: false,
+        phase: 'failed',
+        lastError: 'No source status after watchdog reload'
+      }, { errors: 1 });
+      this.settleSource(runId, source, { source, status: 'rejected', error: 'No source status after watchdog reload' });
+    }
   }
 
   async activeTabForWindow(window) {
@@ -345,7 +422,8 @@ class MultiWindowOrchestrator {
       mode,
       tabId,
       windowId,
-      phase: 'starting',
+      phase: 'initialize',
+      status: 'starting',
       active: true,
       lastProgressAt: new Date().toISOString()
     });
@@ -373,7 +451,7 @@ class MultiWindowOrchestrator {
   }
 
   async startSourceWindow(source, context) {
-    const { runId, credentials, ownerTab, mode } = context;
+    const { runId, credentials, ownerTab, mode, parentState } = context;
     const target = targetForSource(source);
     if (!target) throw new Error(`No target URL for source: ${source}`);
     const entry = this.entry(runId);
@@ -391,17 +469,30 @@ class MultiWindowOrchestrator {
     this.recordProgress(runId, source);
     this.startWatchdog(runId, source);
     await this.updateSourceWindow(runId, source, tab.id, window.id, sourceRunId, mode);
+    await appendLog(runId, 'info', `[orchestrator] Source window created: source=${source} sourceRunId=${sourceRunId}`);
     await appendLog(runId, 'info', `[orchestrator] Window created: ${source} windowId=${window.id}`);
     await waitForTabComplete(runId, tab.id, 30000);
+    await focusWindow(window.id);
+    await activateTab(tab.id);
     await sendScraperCommandWithRetry(runId, tab.id, {
-      action: 'scraper:start',
+      action: 'START_SOURCE_RUN',
+      type: 'START_SOURCE_RUN',
       runId,
       parentRunId: runId,
       sourceRunId,
       mode,
-      credentials,
-      source
+      source,
+      keywords: parentState?.keywords || [],
+      settings: {
+        targetCount: parentState?.targetCount,
+        dateLimit: parentState?.dateLimit || null,
+        infiniteLoop: !!parentState?.infiniteLoop,
+        sendToServer: !!parentState?.sendToServer,
+        saveToPC: !!parentState?.saveToPC
+      },
+      credentialsForThisSourceOnly: credentialsForSource(credentials, source)
     }, `Start source run ${source}`);
+    await appendLog(runId, 'info', `[orchestrator] START_SOURCE_RUN sent: source=${source}`);
     await appendLog(runId, 'info', `[orchestrator] Source run started: ${source} sourceRunId=${sourceRunId}`);
     return { windowId: window.id, tabId: tab.id, sourceRunId };
   }
@@ -449,6 +540,7 @@ class MultiWindowOrchestrator {
     await appendLog(sharedContext.runId, 'info', '[orchestrator] Waiting for remaining sources');
     const results = await Promise.allSettled(runs);
     await appendLog(sharedContext.runId, 'info', '[orchestrator] All source windows settled');
+    await appendLog(sharedContext.runId, 'info', '[orchestrator] All sources settled');
     return results;
   }
 
@@ -457,11 +549,12 @@ class MultiWindowOrchestrator {
     if (!state || state.runId !== runId || !state.active) throw new Error('Run is not active');
     if (!isMultiState(state)) throw new Error(`Run is not a multi scraping mode: ${state.scrapingMode || 'single'}`);
     const sources = state.sources?.length ? state.sources : app.utils.sourcesForMode(state.scrapingMode, state.platform);
+    await appendLog(runId, 'info', `[orchestrator] Parent run started: ${runId}`);
     await appendLog(runId, 'info', `[orchestrator] Multi-window mode started: ${state.scrapingMode}`);
     await appendLog(runId, 'info', `[orchestrator] Sources to run: ${sources.join(', ')}`);
     await stateRepository.patch(runId, { phase: 'running_multi', sources });
     const ownerTab = sender.tab || (state.ownerTabId ? await getTab(state.ownerTabId).catch(() => null) : null);
-    const results = await this.runSources(sources, { runId, credentials, ownerTab, mode: state.scrapingMode });
+    const results = await this.runSources(sources, { runId, credentials, ownerTab, mode: state.scrapingMode, parentState: state });
     const latest = await stateRepository.get();
     if (!latest || latest.runId !== runId || !latest.active) return { results };
     const filename = app.utils.buildFilename(latest.downloadSource || latest.platform);
@@ -484,7 +577,7 @@ class MultiWindowOrchestrator {
       ...Array.from(entry?.windows.values() || []),
       ...sourceTabs.map(([, details]) => details?.windowId).filter(Boolean)
     ]);
-    await Promise.allSettled(Array.from(tabIds).map((tabId) => sendTabMessage(tabId, { action: 'scraper:stop', runId })));
+    await Promise.allSettled(Array.from(tabIds).map((tabId) => sendTabMessage(tabId, { action: 'STOP_SOURCE_RUN', type: 'STOP_SOURCE_RUN', runId })));
     for (const [source] of sourceTabs) {
       await stateRepository.patchSource(runId, source, { active: false, phase: 'stopping', lastError: 'Stopped by user' });
       this.settleSource(runId, source, { source, status: 'rejected', error: 'Stopped by user' });
@@ -500,7 +593,7 @@ class MultiWindowOrchestrator {
   async skip(runId) {
     const state = await stateRepository.get();
     const tabs = Object.values(state?.sourceTabs || {}).map((details) => details?.tabId).filter(Boolean);
-    await Promise.allSettled(tabs.map((tabId) => sendTabMessage(tabId, { action: 'scraper:skip', runId })));
+    await Promise.allSettled(tabs.map((tabId) => sendTabMessage(tabId, { action: 'SKIP_KEYWORD', type: 'SKIP_KEYWORD', runId })));
     setTimeout(() => {
       void (async () => {
         const latest = await stateRepository.get();
@@ -517,13 +610,15 @@ class MultiWindowOrchestrator {
     const credentials = await stateRepository.getSecrets(state.runId);
     const sourceDetails = state.sourceTabs?.[source] || {};
     try {
+      if (sourceDetails.windowId) await focusWindow(sourceDetails.windowId);
+      await activateTab(tabId);
       const response = await sendTabMessage(tabId, {
         action: 'scraper:resume',
         runId: state.runId,
         parentRunId: state.runId,
         sourceRunId: sourceDetails.sourceRunId,
         mode: state.scrapingMode,
-        credentials,
+        credentials: credentialsForSource(credentials, source),
         source
       });
       if (!response?.success) throw new Error(response?.error || 'Content script did not acknowledge Resume');
@@ -556,6 +651,11 @@ class MultiWindowOrchestrator {
       lastError: request.error || '',
       finishedAt: new Date().toISOString()
     });
+    const latest = await stateRepository.get();
+    const remaining = Object.entries(latest?.sourceStates || {})
+      .filter(([, sourceState]) => sourceState?.active !== false)
+      .map(([source]) => source);
+    await appendLog(request.runId, 'info', `[orchestrator] Waiting for remaining sources: ${remaining.join(', ') || 'none'}`);
     this.settleSource(request.runId, request.source, request);
   }
 

@@ -177,12 +177,17 @@
   function sourceStatesFor(sources, firstKeyword) {
     return Object.fromEntries(sources.map((source) => [source, {
       active: true,
-      phase: 'starting',
+      phase: 'initialize',
+      status: 'queued',
       keywordIndex: 0,
       currentKeyword: firstKeyword,
       stats: { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
       lastSkipNonce: 0,
-      tabId: null
+      parentRunId: null,
+      sourceRunId: null,
+      tabId: null,
+      windowId: null,
+      lastProgressAt: null
     }]));
   }
 
