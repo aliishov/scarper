@@ -50,6 +50,45 @@
       return state;
     };
 
+    const parentRunKey = (runId) => `parentRun:${runId}`;
+    const sourceRunKey = (sourceRunId) => `sourceRun:${sourceRunId}`;
+
+    const mirrorParentRun = async (state) => {
+      if (!state?.runId) return;
+      await chrome.storage.local.set({
+        [parentRunKey(state.runId)]: {
+          runId: state.runId,
+          active: state.active,
+          phase: state.phase,
+          scrapingMode: state.scrapingMode,
+          sources: state.sources || [],
+          stats: state.stats || {},
+          updatedAt: state.updatedAt || new Date().toISOString()
+        }
+      });
+    };
+
+    const mirrorSourceRun = async (runId, source, sourceState) => {
+      if (!sourceState?.sourceRunId) return;
+      await chrome.storage.local.set({
+        [sourceRunKey(sourceState.sourceRunId)]: {
+          parentRunId: runId,
+          sourceRunId: sourceState.sourceRunId,
+          source,
+          active: sourceState.active,
+          phase: sourceState.phase,
+          status: sourceState.status || sourceState.phase || '',
+          keywordIndex: sourceState.keywordIndex || 0,
+          currentKeyword: sourceState.currentKeyword || '',
+          stats: sourceState.stats || {},
+          tabId: sourceState.tabId || null,
+          windowId: sourceState.windowId || null,
+          lastProgressAt: sourceState.lastProgressAt || '',
+          updatedAt: new Date().toISOString()
+        }
+      });
+    };
+
     return Object.freeze({
       get() {
         return exclusive(read);
@@ -58,6 +97,7 @@
         return exclusive(async () => {
           const cleanState = { ...state, revision: 1, logs: (state.logs || []).slice(-app.constants.MAX_LOGS) };
           await write(cleanState);
+          await mirrorParentRun(cleanState);
           if (chrome.storage.session) {
             await chrome.storage.session.set({ [`scraperSecrets:${state.runId}`]: { ...secrets } });
           }
@@ -75,7 +115,9 @@
             revision: (current.revision || 0) + 1,
             updatedAt: new Date().toISOString()
           };
-          return write(next);
+          const written = await write(next);
+          await mirrorParentRun(written);
+          return written;
         });
       },
       patchSource(runId, source, patch = {}, statsDelta = {}) {
@@ -93,13 +135,17 @@
           for (const [field, delta] of Object.entries(statsDelta || {})) {
             stats[field] = Number(stats[field] || 0) + Number(delta || 0);
           }
-          return write({
+          const next = {
             ...current,
             sourceStates,
             stats,
             revision: (current.revision || 0) + 1,
             updatedAt: new Date().toISOString()
-          });
+          };
+          const written = await write(next);
+          await mirrorParentRun(written);
+          await mirrorSourceRun(runId, source, sourceStates[source]);
+          return written;
         });
       },
       appendLog(runId, entry) {
