@@ -552,17 +552,41 @@ class MultiWindowOrchestrator {
     }
   }
 
+  async runSocialSourcesSequentially(sources, sharedContext) {
+    const results = [];
+    if (!sources.length) return results;
+    await appendLog(sharedContext.runId, 'warn', `[orchestrator] Social focus queue enabled concurrency=1: ${sources.join(', ')}`);
+    for (const source of sources) {
+      const state = await stateRepository.get();
+      if (!state || state.runId !== sharedContext.runId || !state.active || state.requestedAction === 'stop') {
+        await appendLog(sharedContext.runId, 'warn', `[orchestrator] Social focus queue stopped before source: ${source}`);
+        break;
+      }
+      await appendLog(sharedContext.runId, 'info', `[orchestrator] Social source starting with exclusive focus: ${source}`);
+      const result = await this.runSource(source, sharedContext);
+      results.push(result);
+      await appendLog(sharedContext.runId, 'info', `[orchestrator] Social source focus released: ${source}`);
+    }
+    return results;
+  }
+
   async runSources(sources, sharedContext) {
     const newsSources = sources.filter((source) => app.utils.sourceType(source) === 'news');
     const socialSources = sources.filter((source) => app.utils.sourceType(source) === 'social');
     const runs = [
       ...newsSources.map((source) => this.runSource(source, sharedContext)),
-      ...socialSources.map((source) => this.runSource(source, sharedContext))
+      ...(socialSources.length ? [this.runSocialSourcesSequentially(socialSources, sharedContext)] : [])
     ];
     if (newsSources.length) await appendLog(sharedContext.runId, 'info', `[orchestrator] News sources scheduled in parallel: ${newsSources.join(', ')}`);
-    if (socialSources.length) await appendLog(sharedContext.runId, 'warn', `[orchestrator] Social sources need browser focus; running with focus grants: ${socialSources.join(', ')}`);
+    if (socialSources.length) await appendLog(sharedContext.runId, 'warn', `[orchestrator] Social sources need browser focus; running through focus queue: ${socialSources.join(', ')}`);
     await appendLog(sharedContext.runId, 'info', '[orchestrator] Waiting for remaining sources');
-    const results = await Promise.allSettled(runs);
+    const settled = await Promise.allSettled(runs);
+    const results = settled.flatMap((result) => {
+      if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+        return result.value.map((value) => ({ status: 'fulfilled', value }));
+      }
+      return [result];
+    });
     await appendLog(sharedContext.runId, 'info', '[orchestrator] All source windows settled');
     await appendLog(sharedContext.runId, 'info', '[orchestrator] All sources settled');
     return results;
