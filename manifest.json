@@ -5,6 +5,7 @@
   "description": "Collects posts from X, Facebook, Instagram, TikTok, and news sites",
   "permissions": [
     "activeTab",
+    "alarms",
     "downloads",
     "sidePanel",
     "storage",
