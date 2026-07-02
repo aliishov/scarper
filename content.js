@@ -4,6 +4,16 @@
   const controller = new app.ScraperController();
   console.log(`Multi-platform scraper content v${app.VERSION} loaded; waiting for explicit Start/Resume`);
 
+  async function logControl(runId, source, message, details = '') {
+    if (!runId) return;
+    try {
+      const logger = new app.Logger(runId, source || 'source');
+      await logger.info(message, details);
+    } catch (error) {
+      console.debug('Could not write content control log', message, error);
+    }
+  }
+
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const action = request?.type || request?.action;
     if (!action) return false;
@@ -25,6 +35,12 @@
       return false;
     }
     if (action === 'scraper:start' || action === 'scraper:resume') {
+      void logControl(
+        request.parentRunId || request.runId,
+        request.source || '',
+        `${action} received sourceRunId=${request.sourceRunId || request.runId}`,
+        `url=${location.href}`
+      );
       controller.start(request.runId, request.credentials || {}, {
         parentRunId: request.parentRunId || request.runId,
         sourceRunId: request.sourceRunId || request.runId,
@@ -35,11 +51,13 @@
       return false;
     }
     if (action === 'scraper:stop' || action === 'STOP_SOURCE_RUN') {
+      void logControl(request.parentRunId || request.runId, request.source || '', `${action} received`, `url=${location.href}`);
       controller.stop('stop');
       sendResponse({ success: true });
       return false;
     }
     if (action === 'scraper:skip' || action === 'SKIP_KEYWORD') {
+      void logControl(request.parentRunId || request.runId, request.source || '', `${action} received`, `url=${location.href}`);
       controller.skip();
       sendResponse({ success: true });
       return false;
@@ -47,7 +65,9 @@
     if (action === 'GET_SOURCE_STATUS') {
       void (async () => {
         try {
-          sendResponse({ success: true, status: await controller.status() });
+          const status = await controller.status();
+          await logControl(request.parentRunId || request.runId, request.source || status.source, `GET_SOURCE_STATUS handled phase=${status.phase || 'unknown'}`, `running=${status.running} url=${status.url || location.href}`);
+          sendResponse({ success: true, status });
         } catch (error) {
           sendResponse({ success: false, error: error.message });
         }
@@ -57,7 +77,9 @@
     if (action === 'FORCE_SOURCE_SCRAPING') {
       void (async () => {
         try {
-          sendResponse({ success: true, status: await controller.forceScraping() });
+          const status = await controller.forceScraping();
+          await logControl(request.parentRunId || request.runId, request.source || status.source, `FORCE_SOURCE_SCRAPING handled phase=${status.phase || 'unknown'}`);
+          sendResponse({ success: true, status });
         } catch (error) {
           sendResponse({ success: false, error: error.message });
         }
