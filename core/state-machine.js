@@ -121,6 +121,10 @@
         mode: this.mode || sourceState.mode || rootState.scrapingMode,
         keywordIndex,
         currentKeyword: sourceState.currentKeyword || rootState.keywords?.[keywordIndex] || rootState.currentKeyword || '',
+        pendingNavigation: sourceState.pendingNavigation || null,
+        navigationResumePhase: sourceState.navigationResumePhase || '',
+        lastNavigationAt: sourceState.lastNavigationAt || '',
+        lastProgressAt: sourceState.lastProgressAt || '',
         stats: sourceState.stats || { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
         scraperProgress: sourceState.scraperProgress || null,
         sourceState: { ...sourceState, sourceRunMatches }
