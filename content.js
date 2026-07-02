@@ -66,7 +66,7 @@
       void (async () => {
         try {
           const status = await controller.status();
-          await logControl(request.parentRunId || request.runId, request.source || status.source, `GET_SOURCE_STATUS handled phase=${status.phase || 'unknown'}`, `running=${status.running}`);
+          await logControl(request.parentRunId || request.runId, request.source || status.source, `GET_SOURCE_STATUS handled phase=${status.phase || 'unknown'}`, `running=${status.running} url=${status.url || location.href}`);
           sendResponse({ success: true, status });
         } catch (error) {
           sendResponse({ success: false, error: error.message });
