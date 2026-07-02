@@ -175,6 +175,7 @@
         active: !!state?.active,
         running: !!this.runningPromise,
         phase: state?.phase || '',
+        url: location.href,
         pendingNavigation: state?.pendingNavigation || '',
         navigationResumePhase: state?.navigationResumePhase || '',
         lastProgressAt: state?.sourceState?.lastProgressAt || state?.lastProgressAt || '',
