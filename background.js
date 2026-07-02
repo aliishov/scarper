@@ -390,8 +390,16 @@ class MultiWindowOrchestrator {
     try {
       const status = await this.requestSourceStatus(runId, source, tabId);
       await appendLog(runId, 'warn', `[orchestrator] Stuck source status: ${source} phase=${status.phase || 'unknown'} pendingNavigation=${status.pendingNavigation || 'none'}`);
-      if (status.phase === 'searching') {
+      if (status.phase === 'searching' && (status.pendingNavigation === 'search' || status.navigationResumePhase === 'scraping')) {
         await this.forceSourceScraping(runId, source, tabId);
+        return;
+      }
+      const reloads = Number(entry?.reloads.get(source) || 0);
+      if (status.phase === 'searching' && reloads < 1) {
+        await appendLog(runId, 'warn', `[orchestrator] Source is still searching without navigation handoff; reloading once: ${source}`);
+        entry?.reloads.set(source, reloads + 1);
+        await reloadTab(tabId);
+        entry?.progress.set(source, Date.now());
         return;
       }
       entry?.progress.set(source, Date.now());
