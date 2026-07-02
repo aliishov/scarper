@@ -27,6 +27,8 @@ async function appendLog(runId, level, message, details = '') {
 const serverQueue = app.createServerQueue(stateRepository, appendLog);
 const resultDownloads = app.createResultDownloads(appendLog);
 const finalizingRuns = new Map();
+const SOURCE_WATCHDOG_ALARM = 'scraper-source-watchdog';
+const SOURCE_WATCHDOG_PERIOD_MINUTES = 0.5;
 let operationQueue = Promise.resolve();
 
 function exclusive(operation) {
@@ -64,6 +66,16 @@ function credentialsForSource(credentials, source) {
 
 function sourceRequiresFocus(source) {
   return app.utils.sourceType(source) === 'social';
+}
+
+function ensureSourceWatchdogAlarm() {
+  if (!chrome.alarms?.create) return;
+  chrome.alarms.create(SOURCE_WATCHDOG_ALARM, { periodInMinutes: SOURCE_WATCHDOG_PERIOD_MINUTES });
+}
+
+function clearSourceWatchdogAlarm() {
+  if (!chrome.alarms?.clear) return;
+  chrome.alarms.clear(SOURCE_WATCHDOG_ALARM);
 }
 
 async function sendToOwner(state, action) {
@@ -282,6 +294,7 @@ async function finalizeRun(runId, stopped) {
       downloadSummary: download
     });
     await appendLog(runId, serverSummary.failed ? 'warn' : 'info', `Run finalized: ${phase}`);
+    clearSourceWatchdogAlarm();
     return { state: finalState, serverSummary, download };
   })().finally(() => finalizingRuns.delete(runId));
   finalizingRuns.set(runId, promise);
@@ -600,6 +613,30 @@ class MultiWindowOrchestrator {
     return results;
   }
 
+  async checkAlarmWatchdogs() {
+    const state = await stateRepository.get();
+    if (!state?.active || !isMultiState(state)) return;
+    const sourceTabs = Object.entries(state.sourceTabs || {});
+    if (!sourceTabs.length) return;
+    await appendLog(state.runId, 'info', '[orchestrator] Alarm watchdog tick');
+    const entry = this.entry(state.runId);
+    for (const [source, details] of sourceTabs) {
+      const sourceState = state.sourceStates?.[source] || {};
+      if (sourceState.active === false || !details?.tabId) continue;
+      const lastProgressAt = Date.parse(sourceState.lastProgressAt || state.updatedAt || '') || 0;
+      if (Date.now() - lastProgressAt < 60000) continue;
+      entry.tabs.set(source, details.tabId);
+      if (details.windowId) entry.windows.set(source, details.windowId);
+      await appendLog(state.runId, 'warn', `[orchestrator] Alarm watchdog stale source: ${source}`);
+      if (sourceRequiresFocus(source) && details.windowId) {
+        await appendLog(state.runId, 'info', `[orchestrator] Alarm focus grant for social source: ${source}`);
+        await focusWindow(details.windowId);
+        await activateTab(details.tabId);
+      }
+      await this.handleStuckSource(state.runId, source, details.tabId);
+    }
+  }
+
   async start(runId, credentials, sender) {
     const state = await stateRepository.get();
     if (!state || state.runId !== runId || !state.active) throw new Error('Run is not active');
@@ -609,6 +646,7 @@ class MultiWindowOrchestrator {
     await appendLog(runId, 'info', `[orchestrator] Multi-window mode started: ${state.scrapingMode}`);
     await appendLog(runId, 'info', `[orchestrator] Sources to run: ${sources.join(', ')}`);
     await stateRepository.patch(runId, { phase: 'running_multi', sources });
+    ensureSourceWatchdogAlarm();
     const ownerTab = sender.tab || (state.ownerTabId ? await getTab(state.ownerTabId).catch(() => null) : null);
     const results = await this.runSources(sources, { runId, credentials, ownerTab, mode: state.scrapingMode, parentState: state });
     const latest = await stateRepository.get();
@@ -865,5 +903,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     await appendLog(state.runId, 'error', 'Owner tab was closed; run stopped');
   })();
 });
+
+if (chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== SOURCE_WATCHDOG_ALARM) return;
+    void multiScrapeController.checkAlarmWatchdogs().catch(console.error);
+  });
+}
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);
