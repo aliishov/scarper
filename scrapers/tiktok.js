@@ -423,12 +423,18 @@
 
     async tiktokProgress(ctx) {
       const state = await app.storage.getState();
-      const progress = state?.scraperProgress;
+      const progress = ctx.state?.sourceState
+        ? state?.sourceStates?.[ctx.state.platform]?.scraperProgress
+        : state?.scraperProgress;
       if (!progress || progress.platform !== 'tiktok' || progress.runId !== ctx.runId || progress.keyword !== ctx.keyword) return null;
       return progress;
     }
 
     async saveTikTokProgress(ctx, progress) {
+      if (ctx.state?.sourceState) {
+        await app.storage.patchSource(ctx.runId, ctx.state.platform, { scraperProgress: progress });
+        return;
+      }
       await app.storage.patch(ctx.runId, { scraperProgress: progress });
     }
 
