@@ -312,6 +312,7 @@ class MultiWindowOrchestrator {
         settlers: new Map(),
         tabs: new Map(),
         windows: new Map(),
+        contentReady: new Map(),
         progress: new Map(),
         reloads: new Map(),
         watchdogs: new Map(),
@@ -328,6 +329,27 @@ class MultiWindowOrchestrator {
   recordProgress(runId, source) {
     const entry = this.runs.get(runId);
     if (entry) entry.progress.set(source, Date.now());
+  }
+
+  markContentReady(runId, source, tabId, url) {
+    const entry = this.entry(runId);
+    entry.contentReady.set(source, {
+      tabId,
+      url,
+      readyAt: Date.now()
+    });
+    this.recordProgress(runId, source);
+  }
+
+  async waitForContentReady(runId, source, tabId, timeoutMs = 15000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await assertRunCanContinue(runId);
+      const ready = this.runs.get(runId)?.contentReady.get(source);
+      if (ready?.tabId === tabId) return ready;
+      await app.utils.sleep(250);
+    }
+    return null;
   }
 
   clearWatchdog(runId, source) {
@@ -403,6 +425,16 @@ class MultiWindowOrchestrator {
     try {
       const status = await this.requestSourceStatus(runId, source, tabId);
       await appendLog(runId, 'warn', `[orchestrator] Stuck source status: ${source} phase=${status.phase || 'unknown'} pendingNavigation=${status.pendingNavigation || 'none'}`);
+      if (!status.running) {
+        const latest = await stateRepository.get();
+        const sourceState = latest?.sourceStates?.[source] || {};
+        if (latest?.active && sourceState.active !== false) {
+          await appendLog(runId, 'warn', `[orchestrator] Source controller is not running; sending resume: ${source}`, `phase=${status.phase || 'unknown'} url=${status.url || ''}`);
+          await this.resumeTab(latest, tabId);
+          entry?.progress.set(source, Date.now());
+          return;
+        }
+      }
       if (status.phase === 'searching' && (status.pendingNavigation === 'search' || status.navigationResumePhase === 'scraping')) {
         await this.forceSourceScraping(runId, source, tabId);
         return;
@@ -505,6 +537,12 @@ class MultiWindowOrchestrator {
     await appendLog(runId, 'info', `[orchestrator] Source window created: source=${source} sourceRunId=${sourceRunId}`);
     await appendLog(runId, 'info', `[orchestrator] Window created: ${source} windowId=${window.id}`);
     await waitForTabComplete(runId, tab.id, 30000);
+    const ready = await this.waitForContentReady(runId, source, tab.id, 15000);
+    if (ready) {
+      await appendLog(runId, 'info', `[orchestrator] Content ready before source start: ${source}`, ready.url || '');
+    } else {
+      await appendLog(runId, 'warn', `[orchestrator] CONTENT_READY timeout before source start: ${source}; start message will retry`);
+    }
     if (sourceRequiresFocus(source)) {
       await appendLog(runId, 'info', `[orchestrator] Focus grant for source start: ${source}`);
       await focusWindow(window.id);
@@ -567,6 +605,7 @@ class MultiWindowOrchestrator {
         tabId = tabId || entry.tabs.get(source) || null;
         entry.windows.delete(source);
         entry.tabs.delete(source);
+        entry.contentReady.delete(source);
       }
       if (windowId) await removeWindow(windowId);
       else if (tabId) await removeTab(tabId);
@@ -758,6 +797,24 @@ class MultiWindowOrchestrator {
     this.settleSource(request.runId, request.source, request);
   }
 
+  async handleContentReady(request, sender) {
+    const tabId = sender.tab?.id;
+    if (!tabId) return { success: true, ignored: true };
+    const state = await stateRepository.get();
+    if (!state?.active || !isMultiState(state)) return { success: true, ignored: true };
+    const source = sourceForTab(state, tabId);
+    if (!source) return { success: true, ignored: true };
+    this.markContentReady(state.runId, source, tabId, request.url || sender.tab?.url || '');
+    await appendLog(state.runId, 'info', `[orchestrator] CONTENT_READY source=${source} tabId=${tabId}`, request.url || sender.tab?.url || '');
+    const sourceState = state.sourceStates?.[source] || {};
+    if (sourceState.active === false) return { success: true, source };
+    if (sourceState.phase !== 'initialize' || sourceState.pendingNavigation) {
+      await appendLog(state.runId, 'info', `[orchestrator] Resuming after CONTENT_READY: ${source}`, request.url || '');
+      await this.resumeTab(state, tabId);
+    }
+    return { success: true, source, sourceRunId: state.sourceTabs?.[source]?.sourceRunId || '' };
+  }
+
   async handleTabRemoved(tabId) {
     const state = await stateRepository.get();
     if (!state?.active || !isMultiState(state)) return false;
@@ -836,6 +893,9 @@ async function handleMessage(request, sender) {
       await multiScrapeController.handleSourceSettled(request);
       return { success: true };
     }
+    case 'CONTENT_READY': {
+      return multiScrapeController.handleContentReady(request, sender);
+    }
     case 'run:skip': {
       const current = await stateRepository.get();
       const nextSkipNonce = Number(current?.skipNonce || 0) + 1;
@@ -884,7 +944,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     const state = await stateRepository.get();
     if (!state?.active || state.requestedAction === 'stop') return;
     if (isMultiState(state)) {
-      await multiScrapeController.resumeTab(state, tabId);
+      const source = sourceForTab(state, tabId);
+      if (source) await appendLog(state.runId, 'info', `[orchestrator] Tab complete; waiting for CONTENT_READY: ${source}`);
       return;
     }
     if (state.ownerTabId !== tabId) return;
