@@ -1,68 +1,28 @@
 (function initializeStateMachine(app) {
   'use strict';
 
-  const stateMachineLocks = new Map();
-
-  function lockKeyFor(runId, sourceRunId) {
-    return sourceRunId || runId;
-  }
-
-  function isLocked(runKey) {
-    return stateMachineLocks.has(runKey);
-  }
-
-  function lock(runKey) {
-    if (isLocked(runKey)) return false;
-    stateMachineLocks.set(runKey, Date.now());
-    return true;
-  }
-
-  function unlock(runKey) {
-    stateMachineLocks.delete(runKey);
-  }
-
   class ScraperController {
     constructor() {
       this.runId = '';
-      this.parentRunId = '';
-      this.sourceRunId = '';
-      this.mode = '';
-      this.runKey = '';
       this.sessionToken = null;
       this.keywordToken = null;
       this.runningPromise = null;
       this.credentials = {};
       this.sourceOverride = '';
-      this.lockLogged = false;
     }
 
     async start(runId, credentials = {}, options = {}) {
-      const sourceRunId = options.sourceRunId || runId;
-      const runKey = lockKeyFor(runId, sourceRunId);
-      if (this.runningPromise && this.runKey === runKey) return this.runningPromise;
+      if (this.runningPromise && this.runId === runId) return this.runningPromise;
       if (this.runningPromise) this.stop('superseded');
-      if (!lock(runKey)) {
-        const platform = options.source || 'scraper';
-        const logger = new app.Logger(runId, platform);
-        await logger.warn(`State machine lock already active for sourceRunId=${sourceRunId}`);
-        return this.runningPromise || Promise.resolve();
-      }
       this.runId = runId;
-      this.parentRunId = options.parentRunId || runId;
-      this.sourceRunId = sourceRunId;
-      this.mode = options.mode || '';
-      this.runKey = runKey;
       this.credentials = { ...credentials };
       this.sourceOverride = options.source || '';
-      this.lockLogged = false;
       this.sessionToken = new app.utils.CancellationToken();
       this.runningPromise = this.run(runId)
         .catch((error) => this.handleFatal(error))
         .finally(() => {
-          unlock(runKey);
           this.runningPromise = null;
           this.keywordToken = null;
-          this.runKey = '';
         });
       return this.runningPromise;
     }
@@ -84,12 +44,7 @@
       const logger = new app.Logger(state.runId, state.platform);
       if (state.phase !== phase) await logger.transition(state.phase, phase);
       if (this.sourceOverride) {
-        const nextRoot = await app.storage.patchSource(state.runId, this.sourceOverride, {
-          phase,
-          sourceRunId: this.sourceRunId,
-          lastProgressAt: new Date().toISOString(),
-          ...extra
-        });
+        const nextRoot = await app.storage.patchSource(state.runId, this.sourceOverride, { phase, ...extra });
         return this.stateForSource(nextRoot);
       }
       return app.storage.patch(state.runId, { phase, ...extra });
@@ -105,21 +60,16 @@
       const source = this.sourceOverride;
       const sourceState = rootState.sourceStates?.[source] || {};
       const keywordIndex = Number.isInteger(sourceState.keywordIndex) ? sourceState.keywordIndex : 0;
-      const expectedSourceRunId = this.sourceRunId || sourceState.sourceRunId || rootState.runId;
-      const sourceRunMatches = !sourceState.sourceRunId || !this.sourceRunId || sourceState.sourceRunId === this.sourceRunId;
       return {
         ...rootState,
-        active: !!rootState.active && sourceState.active !== false && sourceRunMatches,
+        active: !!rootState.active && sourceState.active !== false,
         platform: source,
-        phase: sourceState.phase || 'initialize',
-        parentRunId: this.parentRunId || rootState.runId,
-        sourceRunId: expectedSourceRunId,
-        mode: this.mode || sourceState.mode || rootState.scrapingMode,
+        phase: sourceState.phase || 'starting',
         keywordIndex,
         currentKeyword: sourceState.currentKeyword || rootState.keywords?.[keywordIndex] || rootState.currentKeyword || '',
         stats: sourceState.stats || { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
         scraperProgress: sourceState.scraperProgress || null,
-        sourceState: { ...sourceState, sourceRunMatches }
+        sourceState
       };
     }
 
@@ -132,11 +82,7 @@
 
     async patchRunState(state, patch, statsDelta = {}) {
       if (!this.sourceOverride) return app.storage.patch(state.runId, patch);
-      const rootState = await app.storage.patchSource(state.runId, this.sourceOverride, {
-        sourceRunId: this.sourceRunId,
-        lastProgressAt: new Date().toISOString(),
-        ...patch
-      }, statsDelta);
+      const rootState = await app.storage.patchSource(state.runId, this.sourceOverride, patch, statsDelta);
       return this.stateForSource(rootState);
     }
 
@@ -146,8 +92,6 @@
         await chrome.runtime.sendMessage({
           action: 'multi:sourceSettled',
           runId: this.runId,
-          parentRunId: this.parentRunId || this.runId,
-          sourceRunId: this.sourceRunId,
           source: this.sourceOverride,
           status,
           ...details
@@ -155,53 +99,6 @@
       } catch (error) {
         console.warn('Could not notify source settlement', this.sourceOverride, error);
       }
-    }
-
-    async status() {
-      const state = await this.readState(this.runId);
-      return {
-        parentRunId: this.parentRunId || this.runId,
-        sourceRunId: this.sourceRunId || this.runId,
-        source: this.sourceOverride || state?.platform || '',
-        mode: this.mode || state?.scrapingMode || '',
-        active: !!state?.active,
-        running: !!this.runningPromise,
-        phase: state?.phase || '',
-        currentKeyword: state?.currentKeyword || '',
-        keywordIndex: Number(state?.keywordIndex || 0),
-        stats: state?.stats || null
-      };
-    }
-
-    async forceScraping() {
-      const state = await this.readState(this.runId);
-      if (!state?.active) return this.status();
-      if (state.phase === 'searching') {
-        const logger = new app.Logger(state.runId, state.platform);
-        await logger.warn(`[${state.platform}] Forcing transition searching -> scraping sourceRunId=${this.sourceRunId || state.runId}`);
-        await this.patchRunState(state, { phase: 'scraping', forcedScrapingAt: new Date().toISOString() });
-      }
-      return this.status();
-    }
-
-    shouldScrapeAfterSearchNavigation(platform, searchResult) {
-      return searchResult?.scrapeAfterNavigation === true || platform === 'facebook' || platform === 'instagram';
-    }
-
-    async logSearchToScraping(state, logger) {
-      if (state.platform === 'facebook') {
-        await logger.info('[facebook] Search confirmed');
-        await logger.info(`[facebook] Transitioning to scraping sourceRunId=${this.sourceRunId || state.runId}`);
-      }
-      if (state.platform === 'instagram') {
-        await logger.info('[instagram] Search results loaded');
-        await logger.info(`[instagram] Transitioning to scraping sourceRunId=${this.sourceRunId || state.runId}`);
-      }
-    }
-
-    async logScrapingStarted(state, logger) {
-      if (state.platform === 'facebook') await logger.info('[facebook] Scraping started');
-      if (state.platform === 'instagram') await logger.info('[instagram] Scraping started');
     }
 
     async run(runId) {
@@ -213,11 +110,6 @@
         if (!scraper) throw new Error(`Unsupported platform: ${state.platform}`);
         this.currentPlatform = state.platform;
         const logger = new app.Logger(runId, state.platform);
-        if (!this.lockLogged) {
-          await logger.info(`State machine lock acquired for sourceRunId=${this.sourceRunId || runId}`);
-          await logger.info(`State machine started sourceRunId=${this.sourceRunId || runId}`);
-          this.lockLogged = true;
-        }
 
         if (!this.sourceOverride && state.requestedAction === 'skip') {
           await logger.info(`Skip applied before keyword work: ${state.currentKeyword}`);
@@ -261,28 +153,13 @@
               credentials: this.credentialsFor(state.platform)
             });
             if (searchResult?.navigating) {
-              if (this.shouldScrapeAfterSearchNavigation(state.platform, searchResult)) {
-                state = await this.transition(state, 'scraping', {
-                  pendingNavigation: 'search',
-                  lastNavigationAt: new Date().toISOString()
-                });
-                await this.logSearchToScraping(state, logger);
-                await logger.info('Navigation started; scraping phase will resume after tab load');
-              } else {
-                await this.patchRunState(state, {
-                  pendingNavigation: 'search',
-                  lastNavigationAt: new Date().toISOString()
-                });
-                await logger.info('Navigation started; state machine will resume after tab load');
-              }
+              await logger.info('Navigation started; state machine will resume after tab load');
               return;
             }
-            await this.logSearchToScraping(state, logger);
             state = await this.transition(state, 'scraping');
           } else {
             await logger.info('Resuming scraping phase without repeating search or filters');
           }
-          await this.logScrapingStarted(state, logger);
           const onPost = async (rawPost) => {
             this.keywordToken.throwIfCancelled();
             const post = app.utils.normalizePost(rawPost, { keyword, source: state.platform });
