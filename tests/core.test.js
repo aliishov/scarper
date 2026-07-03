@@ -96,17 +96,6 @@ test('scraping mode helpers resolve sources and mixed filenames', () => {
   assert.equal(app.utils.filenameSourceForMode('full'), 'mixed');
 });
 
-test('news search URLs are deterministic for multi source runs', () => {
-  assert.equal(app.utils.newsSearchUrl('oxu.az', 'İlham Əliyev'), 'https://oxu.az/all?query=%C4%B0lham%20%C6%8Fliyev');
-  assert.equal(app.utils.newsSearchUrl('media.az', 'Суд', { dateLimit: '2026-07-02' }), 'https://media.az/search?query=%D0%A1%D1%83%D0%B4&date_start=2026-07-02&date_end=&category=&sort_type=0');
-  assert.equal(app.utils.newsSearchUrl('1news.az', 'Messi'), 'https://1news.az/az/axtarish/?q=Messi');
-  assert.equal(app.utils.newsSearchUrl('haqqin.az', 'Məhkəmə'), 'https://haqqin.az/search/M%C9%99hk%C9%99m%C9%99');
-  assert.equal(app.utils.newsSearchUrl('caliber.az', 'Məhkəmə'), 'https://caliber.az/search/M%C9%99hk%C9%99m%C9%99');
-  assert.equal(app.utils.newsSearchUrl('qafqazinfo.az', 'Məhkəmə'), 'https://qafqazinfo.az/news/search?keyword=M%C9%99hk%C9%99m%C9%99');
-  assert.equal(app.utils.newsSearchUrl('lent.az', 'Məhkəmə', { dateLimit: '2026-07-02', now: new Date(2026, 6, 3) }), 'https://lent.az/axtaris-neticesi?search=M%C9%99hk%C9%99m%C9%99&type=1');
-  assert.equal(app.utils.newsSearchUrl('baku.ws', 'Məhkəmə'), 'https://baku.ws/search?query=M%C9%99hk%C9%99m%C9%99');
-});
-
 test('Facebook parses absolute tooltip date without replacing it with now', () => {
   const parsed = app.parsers.facebookDate('Wednesday, June 17, 2026 at 9:28 PM', new Date(2026, 5, 20, 12));
   assert.ok(parsed instanceof Date);

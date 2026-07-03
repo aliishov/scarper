@@ -75,16 +75,6 @@
       try { window.scrollTo({ top: window.scrollY, behavior: 'auto' }); } catch (error) {}
     }
 
-    attachContext(runId, options = {}) {
-      if (!runId) return;
-      if (this.runningPromise && this.runId && this.runId !== runId) return;
-      this.runId = this.runId || runId;
-      this.parentRunId = this.parentRunId || options.parentRunId || runId;
-      this.sourceRunId = this.sourceRunId || options.sourceRunId || runId;
-      this.mode = this.mode || options.mode || '';
-      if (!this.sourceOverride && options.source) this.sourceOverride = options.source;
-    }
-
     skip() {
       this.keywordToken?.cancel('skip');
       try { window.scrollTo({ top: window.scrollY, behavior: 'auto' }); } catch (error) {}
@@ -176,16 +166,10 @@
     }
 
     async status() {
-      return this.statusForContext();
-    }
-
-    async statusForContext(options = {}) {
-      const runId = this.runId || options.runId || options.parentRunId || '';
-      if (!this.runningPromise && options.source) this.attachContext(runId, options);
-      const state = await this.readState(this.runId || runId);
+      const state = await this.readState(this.runId);
       return {
-        parentRunId: this.parentRunId || runId,
-        sourceRunId: this.sourceRunId || options.sourceRunId || runId,
+        parentRunId: this.parentRunId || this.runId,
+        sourceRunId: this.sourceRunId || this.runId,
         source: this.sourceOverride || state?.platform || '',
         mode: this.mode || state?.scrapingMode || '',
         active: !!state?.active,
@@ -202,20 +186,14 @@
     }
 
     async forceScraping() {
-      return this.forceScrapingForContext();
-    }
-
-    async forceScrapingForContext(options = {}) {
-      const runId = this.runId || options.runId || options.parentRunId || '';
-      if (!this.runningPromise && options.source) this.attachContext(runId, options);
-      const state = await this.readState(this.runId || runId);
-      if (!state?.active) return this.statusForContext(options);
+      const state = await this.readState(this.runId);
+      if (!state?.active) return this.status();
       if (state.phase === 'searching') {
         const logger = new app.Logger(state.runId, state.platform);
         await logger.warn(`[${state.platform}] Forcing transition searching -> scraping sourceRunId=${this.sourceRunId || state.runId}`);
         await this.patchRunState(state, { phase: 'scraping', forcedScrapingAt: new Date().toISOString() });
       }
-      return this.statusForContext(options);
+      return this.status();
     }
 
     shouldScrapeAfterSearchNavigation(platform, searchResult) {
@@ -304,24 +282,6 @@
               await logger.info(`[${state.platform}] Resuming after search navigation ${this.sourceRunLabel(state)} expectedPhase=${state.navigationResumePhase || 'searching'} url=${location.href}`);
             }
             state = await this.transition(state, 'searching', this.sourceOverride ? {} : { requestedAction: null });
-            const directNewsUrl = this.sourceOverride && app.utils.sourceType(state.platform) === 'news'
-              ? app.utils.newsSearchUrl(state.platform, keyword, { dateLimit: state.dateLimit || null })
-              : '';
-            const newsResultsReady = directNewsUrl && (
-              String(location.href).split('#')[0] === directNewsUrl
-              || (typeof scraper.resultsMatch === 'function' && scraper.resultsMatch(keyword))
-            );
-            if (directNewsUrl && !newsResultsReady) {
-              await logger.info(`[${state.platform}] Multi news direct search URL strategy`, directNewsUrl);
-              await this.patchRunState(state, {
-                pendingNavigation: 'search',
-                navigationResumePhase: 'searching',
-                lastNavigationAt: new Date().toISOString()
-              });
-              window.location.assign(directNewsUrl);
-              await logger.info('Navigation started; state machine will resume after tab load');
-              return;
-            }
             const searchResult = await scraper.searchKeyword(keyword, {
               state,
               logger,

@@ -27,8 +27,6 @@ async function appendLog(runId, level, message, details = '') {
 const serverQueue = app.createServerQueue(stateRepository, appendLog);
 const resultDownloads = app.createResultDownloads(appendLog);
 const finalizingRuns = new Map();
-const contentReadyByTab = new Map();
-const capabilityRuns = new Map();
 const SOURCE_WATCHDOG_ALARM = 'scraper-source-watchdog';
 const SOURCE_WATCHDOG_PERIOD_MINUTES = 0.5;
 let operationQueue = Promise.resolve();
@@ -129,16 +127,6 @@ function getWindowTabs(windowId) {
   });
 }
 
-function getAllWindows(details = {}) {
-  return new Promise((resolve, reject) => {
-    chrome.windows.getAll(details, (windows) => {
-      const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else resolve(windows || []);
-    });
-  });
-}
-
 function removeWindow(windowId) {
   return new Promise((resolve) => {
     chrome.windows.remove(windowId, () => resolve());
@@ -209,50 +197,6 @@ async function waitForTabComplete(runId, tabId, timeoutMs = 20000) {
   throw new Error('Article tab did not finish loading');
 }
 
-async function waitForTabCompleteAny(tabId, timeoutMs = 30000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const tab = await getTab(tabId);
-    if (tab.status === 'complete') return tab;
-    await app.utils.sleep(250);
-  }
-  throw new Error('Tab did not finish loading');
-}
-
-function recordContentReady(tabId, payload) {
-  if (!tabId) return;
-  contentReadyByTab.set(tabId, {
-    tabId,
-    url: payload?.url || '',
-    readyAt: payload?.readyAt || new Date().toISOString()
-  });
-}
-
-async function waitForContentReadySignal(tabId, timeoutMs = 15000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const ready = contentReadyByTab.get(tabId);
-    if (ready) return ready;
-    await app.utils.sleep(250);
-  }
-  return null;
-}
-
-async function sendProbeMessage(tabId, message, label, maxAttempts = 20) {
-  let lastError = null;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const response = await sendTabMessage(tabId, message);
-      if (!response?.success) throw new Error(response?.error || `${label} failed`);
-      return response;
-    } catch (error) {
-      lastError = error;
-      await app.utils.sleep(500);
-    }
-  }
-  throw lastError || new Error(`${label} did not respond`);
-}
-
 async function sendArticleExtractMessage(runId, tabId, source, preview) {
   let lastError = null;
   for (let attempt = 1; attempt <= 12; attempt++) {
@@ -314,207 +258,6 @@ async function openNewsArticleTab(request, sender) {
   }
 }
 
-async function openCapabilityWindow(url, focused = false) {
-  const window = await createWindow({ url, type: 'normal', focused });
-  const tabs = window?.tabs?.length ? window.tabs : await getWindowTabs(window.id);
-  const tab = tabs.find((item) => item.active) || tabs[0] || null;
-  if (!tab?.id) throw new Error(`Capability window has no tab for ${url}`);
-  return { windowId: window.id, tabId: tab.id, url };
-}
-
-async function runParallelCapabilityTest(request = {}) {
-  const testId = request.testId || `parallel-capability-${Date.now()}`;
-  const keyword = request.keyword || 'Məhkəmə';
-  const dateLimit = request.dateLimit || null;
-  const newsSources = (request.newsSources?.length ? request.newsSources : app.utils.NEWS_SOURCES.slice(0, 5))
-    .filter((source) => app.utils.sourceType(source) === 'news')
-    .slice(0, 5);
-  const socialSources = (request.socialSources?.length ? request.socialSources : ['facebook', 'instagram'])
-    .filter((source) => app.utils.sourceType(source) === 'social')
-    .slice(0, 2);
-  const report = {
-    testId,
-    keyword,
-    startedAt: new Date().toISOString(),
-    researchDecision: {
-      newsParallel: 'possible for direct URL + DOM parsing if content scripts stay alive',
-      socialParallel: 'not reliable for current human-like DOM/UI automation; Chrome has one focused window and synthetic events are not trusted'
-    },
-    testAContentScriptParallelDom: [],
-    testBParallelNewsNavigation: [],
-    testCParallelSocialUiEvents: [],
-    testDWindowFocusReality: [],
-    errors: []
-  };
-  const entry = { heartbeats: new Map() };
-  capabilityRuns.set(testId, entry);
-  const openedWindows = [];
-  console.log('[capability] RUN_PARALLEL_CAPABILITY_TEST started', testId);
-
-  try {
-    const openedNews = await Promise.all(newsSources.map(async (source) => {
-      const searchUrl = app.utils.newsSearchUrl(source, keyword, { dateLimit });
-      const opened = await openCapabilityWindow(searchUrl, false);
-      openedWindows.push(opened.windowId);
-      const tab = await waitForTabCompleteAny(opened.tabId, 30000);
-      const ready = await waitForContentReadySignal(opened.tabId, 15000);
-      return {
-        source,
-        searchUrl,
-        windowId: opened.windowId,
-        tabId: opened.tabId,
-        tabStatus: tab.status || '',
-        tabUrl: tab.url || '',
-        contentReady: !!ready,
-        readyUrl: ready?.url || ''
-      };
-    }));
-
-    await Promise.all(openedNews.map(async (item) => {
-      try {
-        await sendProbeMessage(item.tabId, {
-          action: 'CAPABILITY_START_HEARTBEAT',
-          type: 'CAPABILITY_START_HEARTBEAT',
-          testId,
-          source: item.source,
-          intervalMs: 2000,
-          durationMs: 7000
-        }, `capability heartbeat ${item.source}`);
-      } catch (error) {
-        report.errors.push(`[${item.source}] heartbeat start failed: ${error.message}`);
-      }
-    }));
-    await app.utils.sleep(7500);
-
-    for (const item of openedNews) {
-      const heartbeats = entry.heartbeats.get(item.source) || [];
-      report.testAContentScriptParallelDom.push({
-        source: item.source,
-        windowId: item.windowId,
-        tabId: item.tabId,
-        contentReady: item.contentReady,
-        heartbeatCount: heartbeats.length,
-        status: heartbeats.length >= 2 ? 'alive' : 'weak-or-missing'
-      });
-    }
-
-    report.testBParallelNewsNavigation = await Promise.all(openedNews.map(async (item) => {
-      try {
-        const response = await sendProbeMessage(item.tabId, {
-          action: 'CAPABILITY_DOM_PROBE',
-          type: 'CAPABILITY_DOM_PROBE',
-          source: item.source
-        }, `capability DOM probe ${item.source}`);
-        const snapshot = response.snapshot || {};
-        return {
-          source: item.source,
-          searchUrl: item.searchUrl,
-          contentReadyAfterNavigation: item.contentReady,
-          cardsCount: Number(snapshot.cardsCount || 0),
-          canScrape: Number(snapshot.cardsCount || 0) > 0,
-          url: snapshot.url || item.tabUrl,
-          title: snapshot.title || '',
-          error: snapshot.cardsError || ''
-        };
-      } catch (error) {
-        return {
-          source: item.source,
-          searchUrl: item.searchUrl,
-          contentReadyAfterNavigation: item.contentReady,
-          cardsCount: 0,
-          canScrape: false,
-          url: item.tabUrl,
-          title: '',
-          error: error.message
-        };
-      }
-    }));
-
-    const focusTargets = openedNews.slice(0, 3);
-    for (const target of focusTargets) {
-      await focusWindow(target.windowId);
-      await app.utils.sleep(500);
-      const windows = await getAllWindows({ populate: false });
-      const actual = windows
-        .filter((window) => focusTargets.some((item) => item.windowId === window.id))
-        .map((window) => ({ windowId: window.id, actualFocused: !!window.focused }));
-      report.testDWindowFocusReality.push({
-        windowId: target.windowId,
-        requestedFocused: true,
-        actualFocusedWindows: actual
-      });
-    }
-
-    const openedSocial = await Promise.all(socialSources.map(async (source) => {
-      const target = targetForSource(source);
-      const opened = await openCapabilityWindow(target.url, false);
-      openedWindows.push(opened.windowId);
-      const tab = await waitForTabCompleteAny(opened.tabId, 30000);
-      const ready = await waitForContentReadySignal(opened.tabId, 15000);
-      return {
-        source,
-        windowId: opened.windowId,
-        tabId: opened.tabId,
-        contentReady: !!ready,
-        tabUrl: tab.url || ''
-      };
-    }));
-
-    await Promise.all(openedSocial.map((item) => focusWindow(item.windowId).catch(() => false)));
-    await app.utils.sleep(500);
-    const focusedWindows = await getAllWindows({ populate: false });
-    const focusedMap = new Map(focusedWindows.map((window) => [window.id, !!window.focused]));
-    report.testCParallelSocialUiEvents = await Promise.all(openedSocial.map(async (item) => {
-      try {
-        const response = await sendProbeMessage(item.tabId, {
-          action: 'CAPABILITY_UI_PROBE',
-          type: 'CAPABILITY_UI_PROBE',
-          source: item.source,
-          keyword: request.socialKeyword || 'parallel capability test'
-        }, `capability UI probe ${item.source}`);
-        const probe = response.probe || {};
-        return {
-          source: item.source,
-          focused: focusedMap.get(item.windowId) || false,
-          documentHasFocus: probe.focused,
-          activeElementOk: !!probe.activeElementOk,
-          caretOk: !!probe.caretOk,
-          typingOk: !!probe.typingOk,
-          enterAccepted: !!probe.enterAccepted,
-          error: probe.error || ''
-        };
-      } catch (error) {
-        return {
-          source: item.source,
-          focused: focusedMap.get(item.windowId) || false,
-          documentHasFocus: false,
-          activeElementOk: false,
-          caretOk: false,
-          typingOk: false,
-          enterAccepted: false,
-          error: error.message
-        };
-      }
-    }));
-
-    report.finishedAt = new Date().toISOString();
-    console.table(report.testAContentScriptParallelDom);
-    console.table(report.testBParallelNewsNavigation);
-    console.table(report.testCParallelSocialUiEvents);
-    console.table(report.testDWindowFocusReality.map((row) => ({
-      windowId: row.windowId,
-      requestedFocused: row.requestedFocused,
-      focusedCount: row.actualFocusedWindows.filter((item) => item.actualFocused).length
-    })));
-    return report;
-  } finally {
-    capabilityRuns.delete(testId);
-    if (!request.keepOpen) {
-      await Promise.allSettled(Array.from(new Set(openedWindows)).map((windowId) => removeWindow(windowId)));
-    }
-  }
-}
-
 async function finalizeRun(runId, stopped) {
   if (finalizingRuns.has(runId)) return finalizingRuns.get(runId);
   const promise = (async () => {
@@ -569,7 +312,6 @@ class MultiWindowOrchestrator {
         settlers: new Map(),
         tabs: new Map(),
         windows: new Map(),
-        contentReady: new Map(),
         progress: new Map(),
         reloads: new Map(),
         watchdogs: new Map(),
@@ -586,27 +328,6 @@ class MultiWindowOrchestrator {
   recordProgress(runId, source) {
     const entry = this.runs.get(runId);
     if (entry) entry.progress.set(source, Date.now());
-  }
-
-  markContentReady(runId, source, tabId, url) {
-    const entry = this.entry(runId);
-    entry.contentReady.set(source, {
-      tabId,
-      url,
-      readyAt: Date.now()
-    });
-    this.recordProgress(runId, source);
-  }
-
-  async waitForContentReady(runId, source, tabId, timeoutMs = 15000) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      await assertRunCanContinue(runId);
-      const ready = this.runs.get(runId)?.contentReady.get(source);
-      if (ready?.tabId === tabId) return ready;
-      await app.utils.sleep(250);
-    }
-    return null;
   }
 
   clearWatchdog(runId, source) {
@@ -682,16 +403,6 @@ class MultiWindowOrchestrator {
     try {
       const status = await this.requestSourceStatus(runId, source, tabId);
       await appendLog(runId, 'warn', `[orchestrator] Stuck source status: ${source} phase=${status.phase || 'unknown'} pendingNavigation=${status.pendingNavigation || 'none'}`);
-      if (!status.running) {
-        const latest = await stateRepository.get();
-        const sourceState = latest?.sourceStates?.[source] || {};
-        if (latest?.active && sourceState.active !== false) {
-          await appendLog(runId, 'warn', `[orchestrator] Source controller is not running; sending resume: ${source}`, `phase=${status.phase || 'unknown'} url=${status.url || ''}`);
-          await this.resumeTab(latest, tabId);
-          entry?.progress.set(source, Date.now());
-          return;
-        }
-      }
       if (status.phase === 'searching' && (status.pendingNavigation === 'search' || status.navigationResumePhase === 'scraping')) {
         await this.forceSourceScraping(runId, source, tabId);
         return;
@@ -776,14 +487,9 @@ class MultiWindowOrchestrator {
     if (!target) throw new Error(`No target URL for source: ${source}`);
     const entry = this.entry(runId);
     const sourceRunId = this.sourceRunId(runId, source);
-    const firstKeyword = parentState?.keywords?.[0] || '';
-    const directNewsUrl = app.utils.sourceType(source) === 'news'
-      ? app.utils.newsSearchUrl(source, firstKeyword, { dateLimit: parentState?.dateLimit || null })
-      : '';
     await appendLog(runId, 'info', `[orchestrator] Creating window for source: ${source}`);
-    if (directNewsUrl) await appendLog(runId, 'info', `[orchestrator] News direct search URL: source=${source}`, directNewsUrl);
     const windowDetails = {
-      url: directNewsUrl || target.url,
+      url: target.url,
       type: 'normal',
       focused: true
     };
@@ -799,12 +505,6 @@ class MultiWindowOrchestrator {
     await appendLog(runId, 'info', `[orchestrator] Source window created: source=${source} sourceRunId=${sourceRunId}`);
     await appendLog(runId, 'info', `[orchestrator] Window created: ${source} windowId=${window.id}`);
     await waitForTabComplete(runId, tab.id, 30000);
-    const ready = await this.waitForContentReady(runId, source, tab.id, 15000);
-    if (ready) {
-      await appendLog(runId, 'info', `[orchestrator] Content ready before source start: ${source}`, ready.url || '');
-    } else {
-      await appendLog(runId, 'warn', `[orchestrator] CONTENT_READY timeout before source start: ${source}; start message will retry`);
-    }
     if (sourceRequiresFocus(source)) {
       await appendLog(runId, 'info', `[orchestrator] Focus grant for source start: ${source}`);
       await focusWindow(window.id);
@@ -867,7 +567,6 @@ class MultiWindowOrchestrator {
         tabId = tabId || entry.tabs.get(source) || null;
         entry.windows.delete(source);
         entry.tabs.delete(source);
-        entry.contentReady.delete(source);
       }
       if (windowId) await removeWindow(windowId);
       else if (tabId) await removeTab(tabId);
@@ -1059,67 +758,6 @@ class MultiWindowOrchestrator {
     this.settleSource(request.runId, request.source, request);
   }
 
-  async handleContentReady(request, sender) {
-    const tabId = sender.tab?.id;
-    if (!tabId) return { success: true, ignored: true };
-    const state = await stateRepository.get();
-    if (!state?.active || !isMultiState(state)) return { success: true, ignored: true };
-    const source = sourceForTab(state, tabId);
-    if (!source) return { success: true, ignored: true };
-    this.markContentReady(state.runId, source, tabId, request.url || sender.tab?.url || '');
-    await appendLog(state.runId, 'info', `[orchestrator] CONTENT_READY source=${source} tabId=${tabId}`, request.url || sender.tab?.url || '');
-    const sourceState = state.sourceStates?.[source] || {};
-    if (sourceState.active === false) return { success: true, source };
-    if (sourceState.phase !== 'initialize' || sourceState.pendingNavigation) {
-      await appendLog(state.runId, 'info', `[orchestrator] Resuming after CONTENT_READY: ${source}`, request.url || '');
-      await this.resumeTab(state, tabId);
-    }
-    return { success: true, source, sourceRunId: state.sourceTabs?.[source]?.sourceRunId || '' };
-  }
-
-  async diagnostic(runId = '') {
-    const state = await stateRepository.get();
-    if (!state?.active || !isMultiState(state) || (runId && state.runId !== runId)) {
-      return { active: false, sources: [] };
-    }
-    const entry = this.entry(state.runId);
-    const report = [];
-    await appendLog(state.runId, 'info', '[diagnostic] RUN_MULTI_DIAGNOSTIC started');
-    for (const [source, details] of Object.entries(state.sourceTabs || {})) {
-      const tabId = details?.tabId || null;
-      const sourceState = state.sourceStates?.[source] || {};
-      const ready = entry.contentReady.get(source) || null;
-      const row = {
-        source,
-        sourceRunId: details?.sourceRunId || '',
-        tabId,
-        windowId: details?.windowId || null,
-        phase: sourceState.phase || '',
-        active: sourceState.active !== false,
-        contentReady: !!ready,
-        readyUrl: ready?.url || '',
-        tabStatus: '',
-        tabUrl: '',
-        status: null,
-        error: ''
-      };
-      try {
-        if (tabId) {
-          const tab = await getTab(tabId);
-          row.tabStatus = tab.status || '';
-          row.tabUrl = tab.url || '';
-          row.status = await this.requestSourceStatus(state.runId, source, tabId);
-        }
-      } catch (error) {
-        row.error = error.message;
-      }
-      report.push(row);
-      await appendLog(state.runId, row.error ? 'warn' : 'info', `[diagnostic] ${source} phase=${row.phase || 'unknown'} active=${row.active} contentReady=${row.contentReady} tabStatus=${row.tabStatus || 'unknown'}`, row.error || row.tabUrl || row.readyUrl || '');
-    }
-    await appendLog(state.runId, 'info', `[diagnostic] RUN_MULTI_DIAGNOSTIC finished sources=${report.length}`);
-    return { active: true, runId: state.runId, sources: report };
-  }
-
   async handleTabRemoved(tabId) {
     const state = await stateRepository.get();
     if (!state?.active || !isMultiState(state)) return false;
@@ -1198,29 +836,6 @@ async function handleMessage(request, sender) {
       await multiScrapeController.handleSourceSettled(request);
       return { success: true };
     }
-    case 'CONTENT_READY': {
-      recordContentReady(sender.tab?.id, request);
-      return multiScrapeController.handleContentReady(request, sender);
-    }
-    case 'RUN_MULTI_DIAGNOSTIC':
-    case 'multi:diagnostic': {
-      const report = await multiScrapeController.diagnostic(request.runId || '');
-      return { success: true, report };
-    }
-    case 'PARALLEL_CAPABILITY_HEARTBEAT': {
-      const test = capabilityRuns.get(request.testId || '');
-      if (test) {
-        const source = request.source || 'unknown';
-        const rows = test.heartbeats.get(source) || [];
-        rows.push(request.snapshot || {});
-        test.heartbeats.set(source, rows);
-      }
-      return { success: true };
-    }
-    case 'RUN_PARALLEL_CAPABILITY_TEST': {
-      const report = await runParallelCapabilityTest(request);
-      return { success: true, report };
-    }
     case 'run:skip': {
       const current = await stateRepository.get();
       const nextSkipNonce = Number(current?.skipNonce || 0) + 1;
@@ -1269,8 +884,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     const state = await stateRepository.get();
     if (!state?.active || state.requestedAction === 'stop') return;
     if (isMultiState(state)) {
-      const source = sourceForTab(state, tabId);
-      if (source) await appendLog(state.runId, 'info', `[orchestrator] Tab complete; waiting for CONTENT_READY: ${source}`);
+      await multiScrapeController.resumeTab(state, tabId);
       return;
     }
     if (state.ownerTabId !== tabId) return;
