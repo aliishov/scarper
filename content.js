@@ -4,6 +4,22 @@
   const controller = new app.ScraperController();
   console.log(`Multi-platform scraper content v${app.VERSION} loaded; waiting for explicit Start/Resume`);
 
+  function notifyContentReady() {
+    try {
+      const result = chrome.runtime.sendMessage({
+        action: 'CONTENT_READY',
+        type: 'CONTENT_READY',
+        url: location.href,
+        readyAt: new Date().toISOString()
+      });
+      if (result && typeof result.catch === 'function') result.catch((error) => {
+        console.debug('Could not notify background that content is ready', error);
+      });
+    } catch (error) {
+      console.debug('Could not notify background that content is ready', error);
+    }
+  }
+
   async function logControl(runId, source, message, details = '') {
     if (!runId) return;
     try {
@@ -101,4 +117,6 @@
     }
     return false;
   });
+
+  notifyContentReady();
 })(globalThis.ScraperApp);
