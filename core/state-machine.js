@@ -304,6 +304,24 @@
               await logger.info(`[${state.platform}] Resuming after search navigation ${this.sourceRunLabel(state)} expectedPhase=${state.navigationResumePhase || 'searching'} url=${location.href}`);
             }
             state = await this.transition(state, 'searching', this.sourceOverride ? {} : { requestedAction: null });
+            const directNewsUrl = this.sourceOverride && app.utils.sourceType(state.platform) === 'news'
+              ? app.utils.newsSearchUrl(state.platform, keyword, { dateLimit: state.dateLimit || null })
+              : '';
+            const newsResultsReady = directNewsUrl && (
+              String(location.href).split('#')[0] === directNewsUrl
+              || (typeof scraper.resultsMatch === 'function' && scraper.resultsMatch(keyword))
+            );
+            if (directNewsUrl && !newsResultsReady) {
+              await logger.info(`[${state.platform}] Multi news direct search URL strategy`, directNewsUrl);
+              await this.patchRunState(state, {
+                pendingNavigation: 'search',
+                navigationResumePhase: 'searching',
+                lastNavigationAt: new Date().toISOString()
+              });
+              window.location.assign(directNewsUrl);
+              await logger.info('Navigation started; state machine will resume after tab load');
+              return;
+            }
             const searchResult = await scraper.searchKeyword(keyword, {
               state,
               logger,
