@@ -820,6 +820,49 @@ class MultiWindowOrchestrator {
     return { success: true, source, sourceRunId: state.sourceTabs?.[source]?.sourceRunId || '' };
   }
 
+  async diagnostic(runId = '') {
+    const state = await stateRepository.get();
+    if (!state?.active || !isMultiState(state) || (runId && state.runId !== runId)) {
+      return { active: false, sources: [] };
+    }
+    const entry = this.entry(state.runId);
+    const report = [];
+    await appendLog(state.runId, 'info', '[diagnostic] RUN_MULTI_DIAGNOSTIC started');
+    for (const [source, details] of Object.entries(state.sourceTabs || {})) {
+      const tabId = details?.tabId || null;
+      const sourceState = state.sourceStates?.[source] || {};
+      const ready = entry.contentReady.get(source) || null;
+      const row = {
+        source,
+        sourceRunId: details?.sourceRunId || '',
+        tabId,
+        windowId: details?.windowId || null,
+        phase: sourceState.phase || '',
+        active: sourceState.active !== false,
+        contentReady: !!ready,
+        readyUrl: ready?.url || '',
+        tabStatus: '',
+        tabUrl: '',
+        status: null,
+        error: ''
+      };
+      try {
+        if (tabId) {
+          const tab = await getTab(tabId);
+          row.tabStatus = tab.status || '';
+          row.tabUrl = tab.url || '';
+          row.status = await this.requestSourceStatus(state.runId, source, tabId);
+        }
+      } catch (error) {
+        row.error = error.message;
+      }
+      report.push(row);
+      await appendLog(state.runId, row.error ? 'warn' : 'info', `[diagnostic] ${source} phase=${row.phase || 'unknown'} active=${row.active} contentReady=${row.contentReady} tabStatus=${row.tabStatus || 'unknown'}`, row.error || row.tabUrl || row.readyUrl || '');
+    }
+    await appendLog(state.runId, 'info', `[diagnostic] RUN_MULTI_DIAGNOSTIC finished sources=${report.length}`);
+    return { active: true, runId: state.runId, sources: report };
+  }
+
   async handleTabRemoved(tabId) {
     const state = await stateRepository.get();
     if (!state?.active || !isMultiState(state)) return false;
@@ -900,6 +943,11 @@ async function handleMessage(request, sender) {
     }
     case 'CONTENT_READY': {
       return multiScrapeController.handleContentReady(request, sender);
+    }
+    case 'RUN_MULTI_DIAGNOSTIC':
+    case 'multi:diagnostic': {
+      const report = await multiScrapeController.diagnostic(request.runId || '');
+      return { success: true, report };
     }
     case 'run:skip': {
       const current = await stateRepository.get();
