@@ -65,7 +65,7 @@
     if (action === 'GET_SOURCE_STATUS') {
       void (async () => {
         try {
-          const status = await controller.status();
+          const status = await controller.statusForContext(request);
           await logControl(request.parentRunId || request.runId, request.source || status.source, `GET_SOURCE_STATUS handled phase=${status.phase || 'unknown'}`, `running=${status.running} url=${status.url || location.href}`);
           sendResponse({ success: true, status });
         } catch (error) {
@@ -77,7 +77,7 @@
     if (action === 'FORCE_SOURCE_SCRAPING') {
       void (async () => {
         try {
-          const status = await controller.forceScraping();
+          const status = await controller.forceScrapingForContext(request);
           await logControl(request.parentRunId || request.runId, request.source || status.source, `FORCE_SOURCE_SCRAPING handled phase=${status.phase || 'unknown'}`);
           sendResponse({ success: true, status });
         } catch (error) {
