@@ -519,9 +519,14 @@ class MultiWindowOrchestrator {
     if (!target) throw new Error(`No target URL for source: ${source}`);
     const entry = this.entry(runId);
     const sourceRunId = this.sourceRunId(runId, source);
+    const firstKeyword = parentState?.keywords?.[0] || '';
+    const directNewsUrl = app.utils.sourceType(source) === 'news'
+      ? app.utils.newsSearchUrl(source, firstKeyword, { dateLimit: parentState?.dateLimit || null })
+      : '';
     await appendLog(runId, 'info', `[orchestrator] Creating window for source: ${source}`);
+    if (directNewsUrl) await appendLog(runId, 'info', `[orchestrator] News direct search URL: source=${source}`, directNewsUrl);
     const windowDetails = {
-      url: target.url,
+      url: directNewsUrl || target.url,
       type: 'normal',
       focused: true
     };
