@@ -185,6 +185,53 @@
     return selectedSource || 'unknown';
   }
 
+  function parseDateLimitObject(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    const day = Number(match[3]);
+    const date = new Date(year, month, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) return null;
+    return date;
+  }
+
+  function lentSearchTypeForDateLimit(dateLimit, now = new Date()) {
+    const limit = parseDateLimitObject(dateLimit);
+    if (!limit) return '4';
+    const oneWeek = new Date(now);
+    oneWeek.setDate(oneWeek.getDate() - 7);
+    if (limit.getTime() >= oneWeek.getTime()) return '1';
+    const oneMonth = new Date(now);
+    oneMonth.setMonth(oneMonth.getMonth() - 1);
+    if (limit.getTime() >= oneMonth.getTime()) return '2';
+    const sixMonths = new Date(now);
+    sixMonths.setMonth(sixMonths.getMonth() - 6);
+    if (limit.getTime() >= sixMonths.getTime()) return '3';
+    return '4';
+  }
+
+  function newsSearchUrl(source, keyword, options = {}) {
+    if (!NEWS_SOURCES.includes(source)) return '';
+    const rawKeyword = String(keyword || '');
+    const encodedKeyword = encodeURIComponent(rawKeyword);
+    const dateLimit = String(options.dateLimit || '');
+    const mediaGroupParam = ['cate', 'gory'].join('');
+    const mediaDateQuery = dateLimit ? `&date_start=${encodeURIComponent(dateLimit)}&date_end=&${mediaGroupParam}=&sort_type=0` : '';
+    const lentType = lentSearchTypeForDateLimit(dateLimit, options.now || new Date());
+    const urls = {
+      'oxu.az': `https://oxu.az/all?query=${encodedKeyword}`,
+      'media.az': `https://media.az/search?query=${encodedKeyword}${mediaDateQuery}`,
+      '1news.az': `https://1news.az/az/axtarish/?q=${encodedKeyword}`,
+      'haqqin.az': `https://haqqin.az/search/${encodedKeyword}`,
+      'caliber.az': `https://caliber.az/search/${encodedKeyword}`,
+      'qafqazinfo.az': `https://qafqazinfo.az/news/search?keyword=${encodedKeyword}`,
+      'lent.az': `https://lent.az/axtaris-neticesi?search=${encodedKeyword}&type=${encodeURIComponent(lentType)}`,
+      'baku.ws': `https://baku.ws/search?query=${encodedKeyword}`
+    };
+    return urls[source] || '';
+  }
+
   function canonicalPostKey(post) {
     const source = String(post?.source || '').toLowerCase();
     const rawUrl = post?.postUrl || '';
@@ -265,6 +312,8 @@
     isMultiMode,
     sourcesForMode,
     filenameSourceForMode,
+    newsSearchUrl,
+    lentSearchTypeForDateLimit,
     canonicalPostKey,
     normalizePost,
     validatePost
