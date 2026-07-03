@@ -80,14 +80,9 @@
           status: sourceState.status || sourceState.phase || '',
           keywordIndex: sourceState.keywordIndex || 0,
           currentKeyword: sourceState.currentKeyword || '',
-          pendingNavigation: sourceState.pendingNavigation || null,
-          navigationResumePhase: sourceState.navigationResumePhase || '',
-          lastNavigationAt: sourceState.lastNavigationAt || '',
           stats: sourceState.stats || {},
           tabId: sourceState.tabId || null,
           windowId: sourceState.windowId || null,
-          lastError: sourceState.lastError || '',
-          finishedAt: sourceState.finishedAt || '',
           lastProgressAt: sourceState.lastProgressAt || '',
           updatedAt: new Date().toISOString()
         }

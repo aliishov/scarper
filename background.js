@@ -27,8 +27,6 @@ async function appendLog(runId, level, message, details = '') {
 const serverQueue = app.createServerQueue(stateRepository, appendLog);
 const resultDownloads = app.createResultDownloads(appendLog);
 const finalizingRuns = new Map();
-const SOURCE_WATCHDOG_ALARM = 'scraper-source-watchdog';
-const SOURCE_WATCHDOG_PERIOD_MINUTES = 0.5;
 let operationQueue = Promise.resolve();
 
 function exclusive(operation) {
@@ -62,20 +60,6 @@ function targetForSource(source) {
 function credentialsForSource(credentials, source) {
   if (!app.utils.SOCIAL_SOURCES.includes(source)) return {};
   return { [source]: { ...(credentials?.[source] || {}) } };
-}
-
-function sourceRequiresFocus(source) {
-  return app.utils.sourceType(source) === 'social';
-}
-
-function ensureSourceWatchdogAlarm() {
-  if (!chrome.alarms?.create) return;
-  chrome.alarms.create(SOURCE_WATCHDOG_ALARM, { periodInMinutes: SOURCE_WATCHDOG_PERIOD_MINUTES });
-}
-
-function clearSourceWatchdogAlarm() {
-  if (!chrome.alarms?.clear) return;
-  chrome.alarms.clear(SOURCE_WATCHDOG_ALARM);
 }
 
 async function sendToOwner(state, action) {
@@ -220,11 +204,9 @@ async function sendScraperCommandWithRetry(runId, tabId, message, label, maxAtte
     try {
       const response = await sendTabMessage(tabId, message);
       if (!response?.success) throw new Error(response?.error || `${label} was not acknowledged`);
-      if (attempt > 1) await appendLog(runId, 'info', `[orchestrator] ${label} acknowledged after retry ${attempt}`);
       return response;
     } catch (error) {
       lastError = error;
-      await appendLog(runId, attempt === maxAttempts ? 'error' : 'warn', `[orchestrator] ${label} attempt ${attempt}/${maxAttempts} failed`, error.message);
       await app.utils.sleep(750);
     }
   }
@@ -294,7 +276,6 @@ async function finalizeRun(runId, stopped) {
       downloadSummary: download
     });
     await appendLog(runId, serverSummary.failed ? 'warn' : 'info', `Run finalized: ${phase}`);
-    clearSourceWatchdogAlarm();
     return { state: finalState, serverSummary, download };
   })().finally(() => finalizingRuns.delete(runId));
   finalizingRuns.set(runId, promise);
@@ -350,11 +331,8 @@ class MultiWindowOrchestrator {
         const windowId = currentEntry.windows.get(source);
         const tabId = currentEntry.tabs.get(source);
         await appendLog(runId, 'warn', `[orchestrator] Source stuck detected: ${source} no progress 60s`);
-        if (sourceRequiresFocus(source)) {
-          await appendLog(runId, 'info', `[orchestrator] Focus grant for stuck social source: ${source}`);
-          await focusWindow(windowId);
-          if (tabId) await activateTab(tabId);
-        }
+        await focusWindow(windowId);
+        if (tabId) await activateTab(tabId);
         await this.handleStuckSource(runId, source, tabId);
       })().catch(console.error);
     }, 30000);
@@ -402,17 +380,8 @@ class MultiWindowOrchestrator {
     const entry = this.runs.get(runId);
     try {
       const status = await this.requestSourceStatus(runId, source, tabId);
-      await appendLog(runId, 'warn', `[orchestrator] Stuck source status: ${source} phase=${status.phase || 'unknown'} pendingNavigation=${status.pendingNavigation || 'none'}`);
-      if (status.phase === 'searching' && (status.pendingNavigation === 'search' || status.navigationResumePhase === 'scraping')) {
+      if (status.phase === 'searching') {
         await this.forceSourceScraping(runId, source, tabId);
-        return;
-      }
-      const reloads = Number(entry?.reloads.get(source) || 0);
-      if (status.phase === 'searching' && reloads < 1) {
-        await appendLog(runId, 'warn', `[orchestrator] Source is still searching without navigation handoff; reloading once: ${source}`);
-        entry?.reloads.set(source, reloads + 1);
-        await reloadTab(tabId);
-        entry?.progress.set(source, Date.now());
         return;
       }
       entry?.progress.set(source, Date.now());
@@ -488,13 +457,11 @@ class MultiWindowOrchestrator {
     const entry = this.entry(runId);
     const sourceRunId = this.sourceRunId(runId, source);
     await appendLog(runId, 'info', `[orchestrator] Creating window for source: ${source}`);
-    const windowDetails = {
+    const window = await createWindow({
       url: target.url,
       type: 'normal',
       focused: true
-    };
-    if (!sourceRequiresFocus(source)) windowDetails.focused = false;
-    const window = await createWindow(windowDetails);
+    });
     const tab = await this.activeTabForWindow(window);
     if (!tab?.id) throw new Error(`Source window for ${source} was created without an active tab`);
     entry.windows.set(source, window.id);
@@ -505,13 +472,8 @@ class MultiWindowOrchestrator {
     await appendLog(runId, 'info', `[orchestrator] Source window created: source=${source} sourceRunId=${sourceRunId}`);
     await appendLog(runId, 'info', `[orchestrator] Window created: ${source} windowId=${window.id}`);
     await waitForTabComplete(runId, tab.id, 30000);
-    if (sourceRequiresFocus(source)) {
-      await appendLog(runId, 'info', `[orchestrator] Focus grant for source start: ${source}`);
-      await focusWindow(window.id);
-      await activateTab(tab.id);
-    } else {
-      await appendLog(runId, 'info', `[orchestrator] News source will run without focus stealing: ${source}`);
-    }
+    await focusWindow(window.id);
+    await activateTab(tab.id);
     await sendScraperCommandWithRetry(runId, tab.id, {
       action: 'START_SOURCE_RUN',
       type: 'START_SOURCE_RUN',
@@ -529,7 +491,7 @@ class MultiWindowOrchestrator {
         saveToPC: !!parentState?.saveToPC
       },
       credentialsForThisSourceOnly: credentialsForSource(credentials, source)
-    }, `Start source run ${source}`, 12);
+    }, `Start source run ${source}`);
     await appendLog(runId, 'info', `[orchestrator] START_SOURCE_RUN sent: source=${source}`);
     await appendLog(runId, 'info', `[orchestrator] Source run started: ${source} sourceRunId=${sourceRunId}`);
     return { windowId: window.id, tabId: tab.id, sourceRunId };
@@ -573,68 +535,13 @@ class MultiWindowOrchestrator {
     }
   }
 
-  async runSocialSourcesSequentially(sources, sharedContext) {
-    const results = [];
-    if (!sources.length) return results;
-    await appendLog(sharedContext.runId, 'warn', `[orchestrator] Social focus queue enabled concurrency=1: ${sources.join(', ')}`);
-    for (const source of sources) {
-      const state = await stateRepository.get();
-      if (!state || state.runId !== sharedContext.runId || !state.active || state.requestedAction === 'stop') {
-        await appendLog(sharedContext.runId, 'warn', `[orchestrator] Social focus queue stopped before source: ${source}`);
-        break;
-      }
-      await appendLog(sharedContext.runId, 'info', `[orchestrator] Social source starting with exclusive focus: ${source}`);
-      const result = await this.runSource(source, sharedContext);
-      results.push(result);
-      await appendLog(sharedContext.runId, 'info', `[orchestrator] Social source focus released: ${source}`);
-    }
-    return results;
-  }
-
   async runSources(sources, sharedContext) {
-    const newsSources = sources.filter((source) => app.utils.sourceType(source) === 'news');
-    const socialSources = sources.filter((source) => app.utils.sourceType(source) === 'social');
-    const runs = [
-      ...newsSources.map((source) => this.runSource(source, sharedContext)),
-      ...(socialSources.length ? [this.runSocialSourcesSequentially(socialSources, sharedContext)] : [])
-    ];
-    if (newsSources.length) await appendLog(sharedContext.runId, 'info', `[orchestrator] News sources scheduled in parallel: ${newsSources.join(', ')}`);
-    if (socialSources.length) await appendLog(sharedContext.runId, 'warn', `[orchestrator] Social sources need browser focus; running through focus queue: ${socialSources.join(', ')}`);
+    const runs = sources.map((source) => this.runSource(source, sharedContext));
     await appendLog(sharedContext.runId, 'info', '[orchestrator] Waiting for remaining sources');
-    const settled = await Promise.allSettled(runs);
-    const results = settled.flatMap((result) => {
-      if (result.status === 'fulfilled' && Array.isArray(result.value)) {
-        return result.value.map((value) => ({ status: 'fulfilled', value }));
-      }
-      return [result];
-    });
+    const results = await Promise.allSettled(runs);
     await appendLog(sharedContext.runId, 'info', '[orchestrator] All source windows settled');
     await appendLog(sharedContext.runId, 'info', '[orchestrator] All sources settled');
     return results;
-  }
-
-  async checkAlarmWatchdogs() {
-    const state = await stateRepository.get();
-    if (!state?.active || !isMultiState(state)) return;
-    const sourceTabs = Object.entries(state.sourceTabs || {});
-    if (!sourceTabs.length) return;
-    await appendLog(state.runId, 'info', '[orchestrator] Alarm watchdog tick');
-    const entry = this.entry(state.runId);
-    for (const [source, details] of sourceTabs) {
-      const sourceState = state.sourceStates?.[source] || {};
-      if (sourceState.active === false || !details?.tabId) continue;
-      const lastProgressAt = Date.parse(sourceState.lastProgressAt || state.updatedAt || '') || 0;
-      if (Date.now() - lastProgressAt < 60000) continue;
-      entry.tabs.set(source, details.tabId);
-      if (details.windowId) entry.windows.set(source, details.windowId);
-      await appendLog(state.runId, 'warn', `[orchestrator] Alarm watchdog stale source: ${source}`);
-      if (sourceRequiresFocus(source) && details.windowId) {
-        await appendLog(state.runId, 'info', `[orchestrator] Alarm focus grant for social source: ${source}`);
-        await focusWindow(details.windowId);
-        await activateTab(details.tabId);
-      }
-      await this.handleStuckSource(state.runId, source, details.tabId);
-    }
   }
 
   async start(runId, credentials, sender) {
@@ -646,7 +553,6 @@ class MultiWindowOrchestrator {
     await appendLog(runId, 'info', `[orchestrator] Multi-window mode started: ${state.scrapingMode}`);
     await appendLog(runId, 'info', `[orchestrator] Sources to run: ${sources.join(', ')}`);
     await stateRepository.patch(runId, { phase: 'running_multi', sources });
-    ensureSourceWatchdogAlarm();
     const ownerTab = sender.tab || (state.ownerTabId ? await getTab(state.ownerTabId).catch(() => null) : null);
     const results = await this.runSources(sources, { runId, credentials, ownerTab, mode: state.scrapingMode, parentState: state });
     const latest = await stateRepository.get();
@@ -704,14 +610,9 @@ class MultiWindowOrchestrator {
     const credentials = await stateRepository.getSecrets(state.runId);
     const sourceDetails = state.sourceTabs?.[source] || {};
     try {
-      if (sourceRequiresFocus(source)) {
-        await appendLog(state.runId, 'info', `[orchestrator] Focus grant before resume: ${source}`);
-        if (sourceDetails.windowId) await focusWindow(sourceDetails.windowId);
-        await activateTab(tabId);
-      } else {
-        await appendLog(state.runId, 'info', `[orchestrator] Resuming news source without focus: ${source}`);
-      }
-      const response = await sendScraperCommandWithRetry(state.runId, tabId, {
+      if (sourceDetails.windowId) await focusWindow(sourceDetails.windowId);
+      await activateTab(tabId);
+      const response = await sendTabMessage(tabId, {
         action: 'scraper:resume',
         runId: state.runId,
         parentRunId: state.runId,
@@ -719,7 +620,7 @@ class MultiWindowOrchestrator {
         mode: state.scrapingMode,
         credentials: credentialsForSource(credentials, source),
         source
-      }, `Resume source run ${source}`, 12);
+      });
       if (!response?.success) throw new Error(response?.error || 'Content script did not acknowledge Resume');
       return true;
     } catch (error) {
@@ -903,12 +804,5 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     await appendLog(state.runId, 'error', 'Owner tab was closed; run stopped');
   })();
 });
-
-if (chrome.alarms?.onAlarm) {
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name !== SOURCE_WATCHDOG_ALARM) return;
-    void multiScrapeController.checkAlarmWatchdogs().catch(console.error);
-  });
-}
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(console.error);

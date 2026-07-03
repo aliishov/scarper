@@ -95,10 +95,6 @@
       return app.storage.patch(state.runId, { phase, ...extra });
     }
 
-    sourceRunLabel(state = null) {
-      return `sourceRunId=${this.sourceRunId || state?.sourceRunId || this.runId}`;
-    }
-
     credentialsFor(platform) {
       const key = platform === 'facebook' ? 'facebook' : platform === 'instagram' ? 'instagram' : platform === 'twitter' ? 'twitter' : '';
       return key ? { ...(this.credentials[key] || {}) } : {};
@@ -121,10 +117,6 @@
         mode: this.mode || sourceState.mode || rootState.scrapingMode,
         keywordIndex,
         currentKeyword: sourceState.currentKeyword || rootState.keywords?.[keywordIndex] || rootState.currentKeyword || '',
-        pendingNavigation: sourceState.pendingNavigation || null,
-        navigationResumePhase: sourceState.navigationResumePhase || '',
-        lastNavigationAt: sourceState.lastNavigationAt || '',
-        lastProgressAt: sourceState.lastProgressAt || '',
         stats: sourceState.stats || { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
         scraperProgress: sourceState.scraperProgress || null,
         sourceState: { ...sourceState, sourceRunMatches }
@@ -175,10 +167,6 @@
         active: !!state?.active,
         running: !!this.runningPromise,
         phase: state?.phase || '',
-        url: location.href,
-        pendingNavigation: state?.pendingNavigation || '',
-        navigationResumePhase: state?.navigationResumePhase || '',
-        lastProgressAt: state?.sourceState?.lastProgressAt || state?.lastProgressAt || '',
         currentKeyword: state?.currentKeyword || '',
         keywordIndex: Number(state?.keywordIndex || 0),
         stats: state?.stats || null
@@ -200,32 +188,20 @@
       return searchResult?.scrapeAfterNavigation === true || platform === 'facebook' || platform === 'instagram';
     }
 
-    navigationResumePhase(platform, searchResult) {
-      if (searchResult?.resumePhase) return searchResult.resumePhase;
-      if (searchResult?.nextPhase) return searchResult.nextPhase;
-      return this.shouldScrapeAfterSearchNavigation(platform, searchResult) ? 'scraping' : 'searching';
-    }
-
     async logSearchToScraping(state, logger) {
       if (state.platform === 'facebook') {
         await logger.info('[facebook] Search confirmed');
         await logger.info(`[facebook] Transitioning to scraping sourceRunId=${this.sourceRunId || state.runId}`);
-        return;
       }
       if (state.platform === 'instagram') {
         await logger.info('[instagram] Search results loaded');
         await logger.info(`[instagram] Transitioning to scraping sourceRunId=${this.sourceRunId || state.runId}`);
-        return;
       }
-      await logger.info(`[${state.platform}] Search confirmed; transitioning to scraping ${this.sourceRunLabel(state)}`);
     }
 
     async logScrapingStarted(state, logger) {
       if (state.platform === 'facebook') await logger.info('[facebook] Scraping started');
       if (state.platform === 'instagram') await logger.info('[instagram] Scraping started');
-      if (state.platform !== 'facebook' && state.platform !== 'instagram') {
-        await logger.info(`[${state.platform}] Scraping started ${this.sourceRunLabel(state)}`);
-      }
     }
 
     async run(runId) {
@@ -240,10 +216,8 @@
         if (!this.lockLogged) {
           await logger.info(`State machine lock acquired for sourceRunId=${this.sourceRunId || runId}`);
           await logger.info(`State machine started sourceRunId=${this.sourceRunId || runId}`);
-          await logger.info(`State machine context ${this.sourceRunLabel(state)} phase=${state.phase} url=${location.href}`);
           this.lockLogged = true;
         }
-        await logger.info(`State machine tick ${this.sourceRunLabel(state)} phase=${state.phase} keywordIndex=${state.keywordIndex} url=${location.href}`);
 
         if (!this.sourceOverride && state.requestedAction === 'skip') {
           await logger.info(`Skip applied before keyword work: ${state.currentKeyword}`);
@@ -278,9 +252,6 @@
 
           const resumeScraping = state.phase === 'scraping';
           if (!resumeScraping) {
-            if (state.pendingNavigation === 'search') {
-              await logger.info(`[${state.platform}] Resuming after search navigation ${this.sourceRunLabel(state)} expectedPhase=${state.navigationResumePhase || 'searching'} url=${location.href}`);
-            }
             state = await this.transition(state, 'searching', this.sourceOverride ? {} : { requestedAction: null });
             const searchResult = await scraper.searchKeyword(keyword, {
               state,
@@ -290,12 +261,9 @@
               credentials: this.credentialsFor(state.platform)
             });
             if (searchResult?.navigating) {
-              const resumePhase = this.navigationResumePhase(state.platform, searchResult);
-              await logger.info(`[${state.platform}] Search navigation handoff ${this.sourceRunLabel(state)} resumePhase=${resumePhase} url=${location.href}`);
-              if (resumePhase === 'scraping') {
+              if (this.shouldScrapeAfterSearchNavigation(state.platform, searchResult)) {
                 state = await this.transition(state, 'scraping', {
                   pendingNavigation: 'search',
-                  navigationResumePhase: resumePhase,
                   lastNavigationAt: new Date().toISOString()
                 });
                 await this.logSearchToScraping(state, logger);
@@ -303,24 +271,16 @@
               } else {
                 await this.patchRunState(state, {
                   pendingNavigation: 'search',
-                  navigationResumePhase: resumePhase,
                   lastNavigationAt: new Date().toISOString()
                 });
                 await logger.info('Navigation started; state machine will resume after tab load');
               }
               return;
             }
-            if (state.pendingNavigation === 'search') {
-              await this.patchRunState(state, {
-                pendingNavigation: null,
-                navigationResumePhase: null,
-                searchNavigationConfirmedAt: new Date().toISOString()
-              });
-            }
             await this.logSearchToScraping(state, logger);
             state = await this.transition(state, 'scraping');
           } else {
-            await logger.info(`Resuming scraping phase without repeating search or filters ${this.sourceRunLabel(state)} url=${location.href}`);
+            await logger.info('Resuming scraping phase without repeating search or filters');
           }
           await this.logScrapingStarted(state, logger);
           const onPost = async (rawPost) => {
