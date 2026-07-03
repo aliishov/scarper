@@ -9,7 +9,6 @@
     "sidePanel",
     "storage",
     "tabs",
-    "windows",
     "unlimitedStorage"
   ],
   "host_permissions": [
