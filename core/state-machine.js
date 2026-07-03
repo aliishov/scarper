@@ -8,15 +8,13 @@
       this.keywordToken = null;
       this.runningPromise = null;
       this.credentials = {};
-      this.sourceOverride = '';
     }
 
-    async start(runId, credentials = {}, options = {}) {
+    async start(runId, credentials = {}) {
       if (this.runningPromise && this.runId === runId) return this.runningPromise;
       if (this.runningPromise) this.stop('superseded');
       this.runId = runId;
       this.credentials = { ...credentials };
-      this.sourceOverride = options.source || '';
       this.sessionToken = new app.utils.CancellationToken();
       this.runningPromise = this.run(runId)
         .catch((error) => this.handleFatal(error))
@@ -43,10 +41,6 @@
     async transition(state, phase, extra = {}) {
       const logger = new app.Logger(state.runId, state.platform);
       if (state.phase !== phase) await logger.transition(state.phase, phase);
-      if (this.sourceOverride) {
-        const nextRoot = await app.storage.patchSource(state.runId, this.sourceOverride, { phase, ...extra });
-        return this.stateForSource(nextRoot);
-      }
       return app.storage.patch(state.runId, { phase, ...extra });
     }
 
@@ -55,70 +49,18 @@
       return key ? { ...(this.credentials[key] || {}) } : {};
     }
 
-    stateForSource(rootState) {
-      if (!this.sourceOverride || !rootState) return rootState;
-      const source = this.sourceOverride;
-      const sourceState = rootState.sourceStates?.[source] || {};
-      const keywordIndex = Number.isInteger(sourceState.keywordIndex) ? sourceState.keywordIndex : 0;
-      return {
-        ...rootState,
-        active: !!rootState.active && sourceState.active !== false,
-        platform: source,
-        phase: sourceState.phase || 'starting',
-        keywordIndex,
-        currentKeyword: sourceState.currentKeyword || rootState.keywords?.[keywordIndex] || rootState.currentKeyword || '',
-        stats: sourceState.stats || { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
-        scraperProgress: sourceState.scraperProgress || null,
-        sourceState
-      };
-    }
-
-    async readState(runId) {
-      const rootState = await app.storage.getState();
-      if (!this.sourceOverride) return rootState;
-      if (!rootState || rootState.runId !== runId) return rootState;
-      return this.stateForSource(rootState);
-    }
-
-    async patchRunState(state, patch, statsDelta = {}) {
-      if (!this.sourceOverride) return app.storage.patch(state.runId, patch);
-      const rootState = await app.storage.patchSource(state.runId, this.sourceOverride, patch, statsDelta);
-      return this.stateForSource(rootState);
-    }
-
-    async notifySourceSettled(status, details = {}) {
-      if (!this.sourceOverride) return;
-      try {
-        await chrome.runtime.sendMessage({
-          action: 'multi:sourceSettled',
-          runId: this.runId,
-          source: this.sourceOverride,
-          status,
-          ...details
-        });
-      } catch (error) {
-        console.warn('Could not notify source settlement', this.sourceOverride, error);
-      }
-    }
-
     async run(runId) {
       while (true) {
         this.sessionToken.throwIfCancelled();
-        let state = await this.readState(runId);
+        let state = await app.storage.getState();
         if (!state || state.runId !== runId || !state.active || state.requestedAction === 'stop') return;
         const scraper = app.scrapers[state.platform];
         if (!scraper) throw new Error(`Unsupported platform: ${state.platform}`);
         this.currentPlatform = state.platform;
         const logger = new app.Logger(runId, state.platform);
 
-        if (!this.sourceOverride && state.requestedAction === 'skip') {
+        if (state.requestedAction === 'skip') {
           await logger.info(`Skip applied before keyword work: ${state.currentKeyword}`);
-          const continued = await this.advanceKeyword(state, logger, 'skip');
-          if (!continued) return;
-          continue;
-        }
-        if (this.sourceOverride && Number(state.skipNonce || 0) > Number(state.sourceState?.lastSkipNonce || 0)) {
-          await logger.info(`Global skip applied before keyword work: ${state.currentKeyword}`);
           const continued = await this.advanceKeyword(state, logger, 'skip');
           if (!continued) return;
           continue;
@@ -128,8 +70,6 @@
         const navigation = new app.Navigation(logger, this.keywordToken);
         const keyword = state.currentKeyword;
         let currentCount = Number(state.stats?.currentKeyword || 0);
-        let sourceTotal = Number(state.stats?.total || 0);
-        let sourceDuplicates = Number(state.stats?.duplicates || 0);
         await logger.info(`Keyword started: ${keyword}`);
 
         try {
@@ -144,7 +84,7 @@
 
           const resumeScraping = state.phase === 'scraping';
           if (!resumeScraping) {
-            state = await this.transition(state, 'searching', this.sourceOverride ? {} : { requestedAction: null });
+            state = await this.transition(state, 'searching', { requestedAction: null });
             const searchResult = await scraper.searchKeyword(keyword, {
               state,
               logger,
@@ -186,29 +126,19 @@
               this.sessionToken.throwIfCancelled();
             }
             if (saved.duplicate) {
-              sourceDuplicates++;
-              if (this.sourceOverride) {
-                await this.patchRunState(state, { stats: { duplicates: sourceDuplicates } }, { duplicates: 1 });
-              } else {
-                const latest = await app.storage.getState();
-                await app.storage.patch(runId, { stats: { duplicates: Number(latest?.stats?.duplicates || 0) + 1 } });
-              }
+              const latest = await app.storage.getState();
+              await app.storage.patch(runId, { stats: { duplicates: Number(latest?.stats?.duplicates || 0) + 1 } });
               await logger.info('Duplicate post skipped', post.postUrl);
               return { accepted: false, duplicate: true };
             }
             currentCount++;
-            sourceTotal++;
-            if (this.sourceOverride) {
-              await this.patchRunState(state, { stats: { currentKeyword: currentCount, total: sourceTotal } }, { total: 1 });
-            } else {
-              const latest = await app.storage.getState();
-              await app.storage.patch(runId, {
-                stats: {
-                  currentKeyword: currentCount,
-                  total: Number(latest?.stats?.total || 0) + 1
-                }
-              });
-            }
+            const latest = await app.storage.getState();
+            await app.storage.patch(runId, {
+              stats: {
+                currentKeyword: currentCount,
+                total: Number(latest?.stats?.total || 0) + 1
+              }
+            });
             await logger.info(`Post saved (${currentCount}${state.targetCount === -1 ? '' : `/${state.targetCount}`})`, post.postUrl);
             return {
               accepted: true,
@@ -234,7 +164,7 @@
           }
           await logger.info(`Keyword collection finished: ${keyword}`, result?.reason || 'completed');
           await scraper.cleanup();
-          state = await this.readState(runId);
+          state = await app.storage.getState();
           if (!state?.active) return;
           const continued = await this.advanceKeyword(state, logger, result?.reason || 'completed');
           if (!continued) return;
@@ -243,7 +173,7 @@
           if (!(error instanceof app.utils.CancellationError)) throw error;
           if (error.reason === 'skip') {
             await scraper.cleanup();
-            state = await this.readState(runId);
+            state = await app.storage.getState();
             if (!state?.active) return;
             await logger.info(`Keyword skipped immediately: ${keyword}`);
             const continued = await this.advanceKeyword(state, logger, 'skip');
@@ -262,27 +192,15 @@
         const keywordIndex = nextIndex < state.keywords.length ? nextIndex : 0;
         const currentKeyword = state.keywords[keywordIndex];
         await logger.info(`Moving to next keyword: ${currentKeyword}`, reason);
-        await this.patchRunState(state, {
+        await app.storage.patch(state.runId, {
           keywordIndex,
           currentKeyword,
           phase: 'searching',
-          ...(this.sourceOverride ? { lastSkipNonce: Number(state.skipNonce || 0) } : { requestedAction: null }),
+          requestedAction: null,
           scraperProgress: null,
           stats: { currentKeyword: 0 }
         });
         return true;
-      }
-
-      if (this.sourceOverride) {
-        await logger.info(`Source completed all keywords: ${this.sourceOverride}`, reason);
-        await this.patchRunState(state, {
-          active: false,
-          phase: 'completed',
-          finishedAt: new Date().toISOString(),
-          lastSkipNonce: Number(state.skipNonce || 0)
-        });
-        await this.notifySourceSettled('fulfilled', { reason });
-        return false;
       }
 
       await logger.info('All keywords completed; waiting for the server queue');
@@ -297,20 +215,8 @@
       try {
         const state = await app.storage.getState();
         if (!state || state.runId !== this.runId) return;
-        const platform = this.sourceOverride || state.platform;
-        const logger = new app.Logger(this.runId, platform);
+        const logger = new app.Logger(this.runId, state.platform);
         await logger.error('Fatal scraper error', error.stack || error.message);
-        if (this.sourceOverride) {
-          const sourceState = state.sourceStates?.[this.sourceOverride] || {};
-          await app.storage.patchSource(this.runId, this.sourceOverride, {
-            active: false,
-            phase: 'failed',
-            lastError: error.message,
-            stats: { errors: Number(sourceState.stats?.errors || 0) + 1 }
-          }, { errors: 1 });
-          await this.notifySourceSettled('rejected', { error: error.message });
-          return;
-        }
         await app.storage.patch(this.runId, {
           active: false,
           phase: 'failed',

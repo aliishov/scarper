@@ -35,28 +35,6 @@ function exclusive(operation) {
   return next;
 }
 
-function isMultiState(state) {
-  return app.utils.isMultiMode(state?.scrapingMode);
-}
-
-function targetForSource(source) {
-  const targets = {
-    facebook: { domain: 'facebook.com', url: 'https://www.facebook.com/' },
-    instagram: { domain: 'instagram.com', url: 'https://www.instagram.com/' },
-    twitter: { domain: 'x.com', url: 'https://x.com/explore' },
-    tiktok: { domain: 'tiktok.com', url: 'https://www.tiktok.com/' },
-    'oxu.az': { domain: 'oxu.az', url: 'https://oxu.az/' },
-    'media.az': { domain: 'media.az', url: 'https://media.az/' },
-    '1news.az': { domain: '1news.az', url: 'https://1news.az/az' },
-    'haqqin.az': { domain: 'haqqin.az', url: 'https://haqqin.az/' },
-    'caliber.az': { domain: 'caliber.az', url: 'https://caliber.az/' },
-    'qafqazinfo.az': { domain: 'qafqazinfo.az', url: 'https://qafqazinfo.az/' },
-    'lent.az': { domain: 'lent.az', url: 'https://lent.az/' },
-    'baku.ws': { domain: 'baku.ws', url: 'https://baku.ws/' }
-  };
-  return targets[source] || null;
-}
-
 async function sendToOwner(state, action) {
   if (!state?.ownerTabId) return false;
   const credentials = await stateRepository.getSecrets(state.runId);
@@ -68,12 +46,6 @@ async function sendToOwner(state, action) {
     await appendLog(state.runId, 'warn', `${action} message could not reach the owner tab`, error.message);
     return false;
   }
-}
-
-function sourceForTab(state, tabId) {
-  if (!isMultiState(state)) return '';
-  return Object.entries(state.sourceTabs || {})
-    .find(([, details]) => details?.tabId === tabId)?.[0] || '';
 }
 
 function createTab(details) {
@@ -150,8 +122,7 @@ async function sendArticleExtractMessage(runId, tabId, source, preview) {
 
 async function openNewsArticleTab(request, sender) {
   const state = await assertRunCanContinue(request.runId);
-  const sourceTabAllowed = state.sourceTabs?.[request.source]?.tabId === sender.tab?.id;
-  if (state.ownerTabId !== sender.tab?.id && !sourceTabAllowed) throw new Error('Article tab request came from a non-owner tab');
+  if (state.ownerTabId !== sender.tab?.id) throw new Error('Article tab request came from a non-owner tab');
   let tab = null;
   await appendLog(request.runId, 'info', `[${request.source}] Opening article in new tab: ${request.url}`);
   try {
@@ -194,7 +165,7 @@ async function finalizeRun(runId, stopped) {
     state = await stateRepository.get();
     let download = null;
     if (state?.saveToPC) {
-      download = await resultDownloads.downloadRun(runId, state.downloadSource || state.platform);
+      download = await resultDownloads.downloadRun(runId, state.platform);
     } else {
       await appendLog(runId, 'info', 'JSONL download is disabled');
     }
@@ -216,177 +187,6 @@ async function finalizeRun(runId, stopped) {
   finalizingRuns.set(runId, promise);
   return promise;
 }
-
-class MultiScrapeController {
-  constructor() {
-    this.runs = new Map();
-  }
-
-  entry(runId) {
-    if (!this.runs.has(runId)) {
-      this.runs.set(runId, { settlers: new Map(), tabs: new Map(), finishing: false });
-    }
-    return this.runs.get(runId);
-  }
-
-  async updateSourceTab(runId, source, tabId) {
-    const state = await stateRepository.get();
-    if (!state || state.runId !== runId) return null;
-    const sourceTabs = { ...(state.sourceTabs || {}), [source]: { tabId, source } };
-    await stateRepository.patch(runId, { sourceTabs });
-    return stateRepository.patchSource(runId, source, { tabId, phase: 'starting', active: true });
-  }
-
-  waitForSource(runId, source) {
-    const entry = this.entry(runId);
-    return new Promise((resolve) => {
-      entry.settlers.set(source, resolve);
-    });
-  }
-
-  settleSource(runId, source, payload) {
-    const entry = this.runs.get(runId);
-    const settle = entry?.settlers.get(source);
-    if (settle) {
-      entry.settlers.delete(source);
-      settle(payload);
-    }
-  }
-
-  async runSource(source, context) {
-    const { runId, credentials, ownerTab } = context;
-    const target = targetForSource(source);
-    if (!target) throw new Error(`No target URL for source: ${source}`);
-    const entry = this.entry(runId);
-    let tab = null;
-    await appendLog(runId, 'info', `[orchestrator] Starting source: ${source}`);
-    try {
-      const tabDetails = { url: target.url, active: false };
-      if (ownerTab?.id) tabDetails.openerTabId = ownerTab.id;
-      if (ownerTab?.windowId) tabDetails.windowId = ownerTab.windowId;
-      tab = await createTab(tabDetails);
-      entry.tabs.set(source, tab.id);
-      await this.updateSourceTab(runId, source, tab.id);
-      await waitForTabComplete(runId, tab.id, 30000);
-      const response = await sendTabMessage(tab.id, { action: 'scraper:start', runId, credentials, source });
-      if (!response?.success) throw new Error(response?.error || 'Content script did not acknowledge Start');
-      const result = await this.waitForSource(runId, source);
-      if (result.status === 'rejected') {
-        await appendLog(runId, 'error', `[orchestrator] Source failed: ${source} error=${result.error || 'Source failed'}`);
-        return result;
-      }
-      await appendLog(runId, 'info', `[orchestrator] Source completed: ${source}`, result.reason || '');
-      return result;
-    } catch (error) {
-      await appendLog(runId, 'error', `[orchestrator] Source failed: ${source} error=${error.message}`);
-      await stateRepository.patchSource(runId, source, {
-        active: false,
-        phase: 'failed',
-        lastError: error.message
-      }, { errors: 1 });
-      return { source, status: 'rejected', error: error.message };
-    } finally {
-      if (tab?.id) {
-        entry.tabs.delete(source);
-        await removeTab(tab.id);
-      }
-    }
-  }
-
-  async runSources(sources, sharedContext) {
-    const runs = sources.map((source) => this.runSource(source, sharedContext));
-    await appendLog(sharedContext.runId, 'info', '[orchestrator] Waiting for remaining sources');
-    const results = await Promise.allSettled(runs);
-    return results;
-  }
-
-  async start(runId, credentials, sender) {
-    const state = await stateRepository.get();
-    if (!state || state.runId !== runId || !state.active) throw new Error('Run is not active');
-    if (!isMultiState(state)) throw new Error(`Run is not a multi scraping mode: ${state.scrapingMode || 'single'}`);
-    const sources = state.sources?.length ? state.sources : app.utils.sourcesForMode(state.scrapingMode, state.platform);
-    await appendLog(runId, 'info', `[orchestrator] Mode selected: ${state.scrapingMode}`);
-    await appendLog(runId, 'info', `[orchestrator] Sources to run: ${sources.join(', ')}`);
-    await stateRepository.patch(runId, { phase: 'running_multi', sources });
-    const ownerTab = sender.tab || (state.ownerTabId ? await getTab(state.ownerTabId).catch(() => null) : null);
-    const results = await this.runSources(sources, { runId, credentials, ownerTab });
-    await appendLog(runId, 'info', '[orchestrator] All sources settled');
-    const latest = await stateRepository.get();
-    if (!latest || latest.runId !== runId || !latest.active) return { results };
-    const filename = app.utils.buildFilename(latest.downloadSource || latest.platform);
-    await appendLog(runId, 'info', `[orchestrator] Saving mixed file: ${filename}`);
-    await stateRepository.patch(runId, { active: false, phase: 'finalizing', requestedAction: null });
-    await finalizeRun(runId, false);
-    this.runs.delete(runId);
-    return { results };
-  }
-
-  async stop(runId) {
-    const entry = this.runs.get(runId);
-    if (!entry) return;
-    await Promise.allSettled(Array.from(entry.tabs.values()).map((tabId) => sendTabMessage(tabId, { action: 'scraper:stop', runId })));
-    await Promise.allSettled(Array.from(entry.tabs.values()).map((tabId) => removeTab(tabId)));
-    entry.tabs.clear();
-    this.runs.delete(runId);
-  }
-
-  async skip(runId) {
-    const state = await stateRepository.get();
-    const tabs = Object.values(state?.sourceTabs || {}).map((details) => details?.tabId).filter(Boolean);
-    await Promise.allSettled(tabs.map((tabId) => sendTabMessage(tabId, { action: 'scraper:skip', runId })));
-    setTimeout(() => {
-      void (async () => {
-        const latest = await stateRepository.get();
-        if (latest?.runId === runId && latest.requestedAction === 'skip') {
-          await stateRepository.patch(runId, { requestedAction: null });
-        }
-      })();
-    }, 1500);
-  }
-
-  async resumeTab(state, tabId) {
-    const source = sourceForTab(state, tabId);
-    if (!source) return false;
-    const credentials = await stateRepository.getSecrets(state.runId);
-    try {
-      const response = await sendTabMessage(tabId, { action: 'scraper:resume', runId: state.runId, credentials, source });
-      if (!response?.success) throw new Error(response?.error || 'Content script did not acknowledge Resume');
-      return true;
-    } catch (error) {
-      await appendLog(state.runId, 'warn', `[orchestrator] Resume failed for source: ${source}`, error.message);
-      return false;
-    }
-  }
-
-  async handleSourceSettled(request) {
-    await stateRepository.patchSource(request.runId, request.source, {
-      active: false,
-      phase: request.status === 'rejected' ? 'failed' : 'completed',
-      lastError: request.error || '',
-      finishedAt: new Date().toISOString()
-    });
-    this.settleSource(request.runId, request.source, request);
-  }
-
-  async handleTabRemoved(tabId) {
-    const state = await stateRepository.get();
-    if (!state?.active || !isMultiState(state)) return false;
-    const source = sourceForTab(state, tabId);
-    if (!source) return false;
-    const sourceState = state.sourceStates?.[source] || {};
-    if (sourceState.active === false) return true;
-    await appendLog(state.runId, 'error', `[orchestrator] Source failed: ${source} error=Source tab was closed`);
-    await stateRepository.patchSource(state.runId, source, {
-      active: false,
-      phase: 'failed',
-      lastError: 'Source tab was closed'
-    }, { errors: 1 });
-    this.settleSource(state.runId, source, { source, status: 'rejected', error: 'Source tab was closed' });
-    return true;
-  }
-}
-
-const multiScrapeController = new MultiScrapeController();
 
 async function handleMessage(request, sender) {
   switch (request.action) {
@@ -417,10 +217,6 @@ async function handleMessage(request, sender) {
       const state = await stateRepository.patch(request.runId, request.patch || {});
       return state ? { success: true, state } : { success: false, error: 'Stale run update rejected' };
     }
-    case 'state:patchSource': {
-      const state = await stateRepository.patchSource(request.runId, request.source, request.patch || {}, request.statsDelta || {});
-      return state ? { success: true, state } : { success: false, error: 'Stale source update rejected' };
-    }
     case 'state:log': {
       const state = await stateRepository.appendLog(request.runId, request.entry);
       return state ? { success: true, state } : { success: false, error: 'Stale log rejected' };
@@ -432,27 +228,11 @@ async function handleMessage(request, sender) {
     case 'news:openArticleTab': {
       return openNewsArticleTab(request, sender);
     }
-    case 'multi:start': {
-      void multiScrapeController.start(request.runId, request.credentials || {}, sender)
-        .catch(async (error) => {
-          await appendLog(request.runId, 'error', '[orchestrator] Multi scrape crashed', error.stack || error.message);
-          await stateRepository.patch(request.runId, { active: false, phase: 'failed', lastError: error.message });
-          await finalizeRun(request.runId, false).catch(console.error);
-        });
-      return { success: true };
-    }
-    case 'multi:sourceSettled': {
-      await multiScrapeController.handleSourceSettled(request);
-      return { success: true };
-    }
     case 'run:skip': {
-      const current = await stateRepository.get();
-      const nextSkipNonce = Number(current?.skipNonce || 0) + 1;
-      const state = await exclusive(() => stateRepository.patch(request.runId, { requestedAction: 'skip', skipNonce: nextSkipNonce }));
+      const state = await exclusive(() => stateRepository.patch(request.runId, { requestedAction: 'skip' }));
       if (!state?.active) return { success: false, error: 'Run is not active' };
       await appendLog(request.runId, 'info', `Skip requested for keyword: ${state.currentKeyword}`);
-      if (isMultiState(state)) await multiScrapeController.skip(request.runId);
-      else await sendToOwner(state, 'scraper:skip');
+      await sendToOwner(state, 'scraper:skip');
       return { success: true, state };
     }
     case 'run:stop': {
@@ -463,8 +243,7 @@ async function handleMessage(request, sender) {
       }));
       if (!state) return { success: false, error: 'Run is no longer current' };
       await appendLog(request.runId, 'info', 'Stop requested by user');
-      if (isMultiState(state)) await multiScrapeController.stop(request.runId);
-      else await sendToOwner(state, 'scraper:stop');
+      await sendToOwner(state, 'scraper:stop');
       const finalized = await finalizeRun(request.runId, true);
       return { success: true, ...finalized };
     }
@@ -491,12 +270,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== 'complete') return;
   void (async () => {
     const state = await stateRepository.get();
-    if (!state?.active || state.requestedAction === 'stop') return;
-    if (isMultiState(state)) {
-      await multiScrapeController.resumeTab(state, tabId);
-      return;
-    }
-    if (state.ownerTabId !== tabId) return;
+    if (!state?.active || state.ownerTabId !== tabId || state.requestedAction === 'stop') return;
     await sendToOwner(state, 'scraper:resume');
   })();
 });
@@ -504,9 +278,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   void (async () => {
     const state = await stateRepository.get();
-    if (await multiScrapeController.handleTabRemoved(tabId)) return;
     if (!state?.active || state.ownerTabId !== tabId) return;
-    if (isMultiState(state)) return;
     await stateRepository.patch(state.runId, { active: false, phase: 'failed', lastError: 'Owner tab was closed' });
     await serverQueue.cancelRun(state.runId);
     await appendLog(state.runId, 'error', 'Owner tab was closed; run stopped');

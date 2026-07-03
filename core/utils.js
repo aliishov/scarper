@@ -152,39 +152,6 @@
     return `${safeSource}_result_${pad(now.getDate())}_${pad(now.getMonth() + 1)}_${now.getFullYear()}.jsonl`;
   }
 
-  const SOCIAL_SOURCES = Object.freeze(['facebook', 'twitter', 'instagram', 'tiktok']);
-  const NEWS_SOURCES = Object.freeze(['oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']);
-  const SCRAPING_MODES = Object.freeze({
-    single: 'single',
-    mixedSocial: 'mixed_social',
-    mixedNews: 'mixed_news',
-    full: 'full'
-  });
-
-  function sourceType(source) {
-    if (SOCIAL_SOURCES.includes(source)) return 'social';
-    if (NEWS_SOURCES.includes(source)) return 'news';
-    return source ? 'unknown' : 'none';
-  }
-
-  function isMultiMode(mode) {
-    return mode === SCRAPING_MODES.mixedSocial || mode === SCRAPING_MODES.mixedNews || mode === SCRAPING_MODES.full;
-  }
-
-  function sourcesForMode(mode, selectedSource = '') {
-    if (mode === SCRAPING_MODES.mixedSocial) return [...SOCIAL_SOURCES];
-    if (mode === SCRAPING_MODES.mixedNews) return [...NEWS_SOURCES];
-    if (mode === SCRAPING_MODES.full) return [...SOCIAL_SOURCES, ...NEWS_SOURCES];
-    return selectedSource ? [selectedSource] : [];
-  }
-
-  function filenameSourceForMode(mode, selectedSource = '') {
-    if (mode === SCRAPING_MODES.mixedSocial) return 'mixed_social_media';
-    if (mode === SCRAPING_MODES.mixedNews) return 'mixed_news';
-    if (mode === SCRAPING_MODES.full) return 'mixed';
-    return selectedSource || 'unknown';
-  }
-
   function canonicalPostKey(post) {
     const source = String(post?.source || '').toLowerCase();
     const rawUrl = post?.postUrl || '';
@@ -258,13 +225,6 @@
     isBeforeDateLimit,
     formatTimestamp,
     buildFilename,
-    SOCIAL_SOURCES,
-    NEWS_SOURCES,
-    SCRAPING_MODES,
-    sourceType,
-    isMultiMode,
-    sourcesForMode,
-    filenameSourceForMode,
     canonicalPostKey,
     normalizePost,
     validatePost

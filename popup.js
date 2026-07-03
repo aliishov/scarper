@@ -3,33 +3,27 @@
 
   const translations = {
     ru: {
-      socialNetwork: 'Социальная сеть', source: 'Источник', selectSource: 'Выберите источник', scrapingMode: 'Режим scraping',
-      modeSingle: 'Режим одиночного скрапинга', modeMixedSocial: 'Режим множественного скрапинга соцсетей', modeMixedNews: 'Режим множественного скрапинга новостных каналов', modeFull: 'Режим полного скрапинга',
-      keywords: 'Ключевые слова, каждое с новой строки', maxPosts: 'Ограничить количество постов на слово',
+      socialNetwork: 'Социальная сеть', source: 'Источник', selectSource: 'Выберите источник', keywords: 'Ключевые слова, каждое с новой строки', maxPosts: 'Ограничить количество постов на слово',
       infiniteLoop: 'Бесконечный сбор', dateLimit: 'Не собирать посты старше даты', sendToServer: 'Отправлять посты на сервер',
       saveToPC: 'Сохранять результаты в JSONL на ПК', auth: 'Данные входа используются только в текущей сессии браузера',
-      multiAuth: 'Данные входа для соцсетей используются только в текущей сессии браузера',
       username: 'Логин или email', password: 'Пароль', ready: 'Готов к запуску', start: 'Начать сбор', stop: 'Остановить',
       skip: 'Следующее слово', logs: 'Логи', stopped: 'Остановлено', completed: 'Завершено', running: 'Выполняется'
     },
     az: {
-      socialNetwork: 'Sosial şəbəkə', source: 'Mənbə', selectSource: 'Mənbə seçin', scrapingMode: 'Scraping rejimi',
-      modeSingle: 'Tək scraping rejimi', modeMixedSocial: 'Sosial şəbəkələrin çoxlu scraping rejimi', modeMixedNews: 'Xəbər kanallarının çoxlu scraping rejimi', modeFull: 'Tam scraping rejimi',
-      keywords: 'Açar sözlər, hər biri yeni sətirdə', maxPosts: 'Hər söz üçün post sayını məhdudlaşdır',
+      socialNetwork: 'Sosial şəbəkə', source: 'Mənbə', selectSource: 'Mənbə seçin', keywords: 'Açar sözlər, hər biri yeni sətirdə', maxPosts: 'Hər söz üçün post sayını məhdudlaşdır',
       infiniteLoop: 'Sonsuz toplama', dateLimit: 'Bu tarixdən köhnə postları toplama', sendToServer: 'Postları serverə göndər',
       saveToPC: 'Nəticələri JSONL kimi kompüterə yaz', auth: 'Giriş məlumatları yalnız cari brauzer sessiyasında istifadə olunur',
-      multiAuth: 'Sosial şəbəkə giriş məlumatları yalnız cari brauzer sessiyasında istifadə olunur',
       username: 'Login və ya email', password: 'Şifrə', ready: 'Başlamağa hazırdır', start: 'Toplamağa başla', stop: 'Dayandır',
       skip: 'Növbəti söz', logs: 'Loqlar', stopped: 'Dayandırılıb', completed: 'Tamamlandı', running: 'İcra olunur'
     }
   };
 
   const elements = Object.fromEntries([
-    'langSelect', 'scrapingMode', 'singleSourceFields', 'platform', 'keywords', 'limitCountToggle', 'count', 'infiniteLoopToggle', 'dateLimitToggle', 'dateLimit',
-    'datePicker', 'sendToServerToggle', 'saveToPCToggle', 'authFields', 'multiAuthFields', 'authUsername', 'authPassword', 'error', 'status', 'start', 'stop', 'skip', 'logs'
+    'langSelect', 'platform', 'keywords', 'limitCountToggle', 'count', 'infiniteLoopToggle', 'dateLimitToggle', 'dateLimit',
+    'datePicker', 'sendToServerToggle', 'saveToPCToggle', 'authFields', 'authUsername', 'authPassword', 'error', 'status', 'start', 'stop', 'skip', 'logs'
   ].map((id) => [id, document.getElementById(id)]));
-  const SOCIAL_SOURCES = new Set(app.utils.SOCIAL_SOURCES);
-  const NEWS_SOURCES = new Set(app.utils.NEWS_SOURCES);
+  const SOCIAL_SOURCES = new Set(['twitter', 'instagram', 'facebook', 'tiktok']);
+  const NEWS_SOURCES = new Set(['oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']);
   let language = localStorage.getItem('scraperLanguage') || 'ru';
   let currentState = null;
   let selectedSource = null;
@@ -65,25 +59,25 @@
     if (!currentState?.active) renderLogs(popupLogs);
   }
 
+  function sourceType(source) {
+    if (!source) return 'none';
+    if (SOCIAL_SOURCES.has(source)) return 'social';
+    if (NEWS_SOURCES.has(source)) return 'news';
+    return 'unknown';
+  }
+
   function updateSourceUi(reason = 'init') {
-    const mode = elements.scrapingMode.value || app.utils.SCRAPING_MODES.single;
     selectedSource = elements.platform.value || null;
-    const type = app.utils.sourceType(selectedSource);
-    const multi = app.utils.isMultiMode(mode);
-    const showSingleSource = mode === app.utils.SCRAPING_MODES.single;
-    const showSingleLogin = showSingleSource && type === 'social';
-    const showMultiLogin = mode === app.utils.SCRAPING_MODES.mixedSocial || mode === app.utils.SCRAPING_MODES.full;
-    elements.singleSourceFields.hidden = !showSingleSource;
-    elements.authFields.hidden = !showSingleLogin;
-    elements.multiAuthFields.hidden = !showMultiLogin;
-    if (!showSingleLogin && !showMultiLogin) showError();
+    const type = sourceType(selectedSource);
+    const showLogin = type === 'social';
+    elements.authFields.hidden = !showLogin;
+    if (!showLogin) showError();
     if (reason === 'change') {
-      debugPopup(`[popup] Scraping mode changed: ${mode}`);
       debugPopup(`[popup] Source changed: ${selectedSource || 'none'}`);
-      debugPopup(`[popup] Source type: ${multi ? 'multi' : type}`);
-      debugPopup(showSingleLogin || showMultiLogin ? '[popup] Login section shown' : '[popup] Login section hidden');
+      debugPopup(`[popup] Source type: ${type}`);
+      debugPopup(showLogin ? '[popup] Login section shown' : '[popup] Login section hidden');
     }
-    return { mode, source: selectedSource, type };
+    return { source: selectedSource, type };
   }
 
   function renderLogs(logs = []) {
@@ -117,13 +111,10 @@
   }
 
   function validateForm() {
-    const mode = elements.scrapingMode.value || app.utils.SCRAPING_MODES.single;
-    const singleMode = mode === app.utils.SCRAPING_MODES.single;
-    const source = singleMode ? elements.platform.value || '' : '';
-    const type = singleMode ? app.utils.sourceType(source) : 'multi';
-    if (singleMode && !source) throw new Error(language === 'ru' ? 'Выберите источник для сбора' : 'Toplamaq üçün mənbə seçin');
-    if (singleMode && type === 'unknown') throw new Error(`Unsupported source: ${source}`);
-    if (!app.utils.SCRAPING_MODES || (!singleMode && !app.utils.isMultiMode(mode))) throw new Error(`Unsupported scraping mode: ${mode}`);
+    const source = elements.platform.value || '';
+    const type = sourceType(source);
+    if (!source) throw new Error(language === 'ru' ? 'Выберите источник для сбора' : 'Toplamaq üçün mənbə seçin');
+    if (type === 'unknown') throw new Error(`Unsupported source: ${source}`);
     const keywords = elements.keywords.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
     if (!keywords.length) throw new Error(language === 'ru' ? 'Введите хотя бы одно ключевое слово.' : 'Ən azı bir açar söz daxil edin.');
     let targetCount = -1;
@@ -136,10 +127,8 @@
     }
     const parsedDate = elements.dateLimitToggle.checked ? app.utils.parseUserDate(elements.dateLimit.value) : { value: null, error: null };
     if (parsedDate.error) throw new Error(parsedDate.error);
-    const sources = app.utils.sourcesForMode(mode, source);
-    const downloadSource = app.utils.filenameSourceForMode(mode, source);
-    debugPopup(`[popup] Start validation passed for ${singleMode ? type : mode} source`);
-    return { mode, source, sourceType: type, sources, downloadSource, keywords, targetCount, dateLimit: parsedDate.value };
+    debugPopup(`[popup] Start validation passed for ${type} source`);
+    return { source, sourceType: type, keywords, targetCount, dateLimit: parsedDate.value };
   }
 
   function platformTarget(platform) {
@@ -157,35 +146,6 @@
     return { domain: 'x.com', url: 'https://x.com/explore' };
   }
 
-  function collectCredentials(form) {
-    if (form.mode === app.utils.SCRAPING_MODES.single) {
-      return form.sourceType === 'social'
-        ? { [form.source]: { username: elements.authUsername.value.trim(), password: elements.authPassword.value } }
-        : {};
-    }
-    if (form.mode === app.utils.SCRAPING_MODES.mixedNews) return {};
-    const credentials = {};
-    document.querySelectorAll('[data-credential-source][data-credential-field]').forEach((input) => {
-      const source = input.dataset.credentialSource;
-      const field = input.dataset.credentialField;
-      credentials[source] = credentials[source] || {};
-      credentials[source][field] = field === 'username' ? input.value.trim() : input.value;
-    });
-    return credentials;
-  }
-
-  function sourceStatesFor(sources, firstKeyword) {
-    return Object.fromEntries(sources.map((source) => [source, {
-      active: true,
-      phase: 'starting',
-      keywordIndex: 0,
-      currentKeyword: firstKeyword,
-      stats: { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
-      lastSkipNonce: 0,
-      tabId: null
-    }]));
-  }
-
   async function activeTab() {
     const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (!tabs[0]?.id) throw new Error(language === 'ru' ? 'Не найдена активная вкладка.' : 'Aktiv tab tapılmadı.');
@@ -198,8 +158,7 @@
     try {
       const form = validateForm();
       const tab = await activeTab();
-      const singleMode = form.mode === app.utils.SCRAPING_MODES.single;
-      const platform = singleMode ? form.source : form.downloadSource;
+      const platform = form.source;
       const runId = crypto.randomUUID();
       const state = {
         version: app.VERSION,
@@ -208,12 +167,6 @@
         active: true,
         phase: 'starting',
         requestedAction: null,
-        scrapingMode: form.mode,
-        sources: form.sources,
-        downloadSource: form.downloadSource,
-        sourceStates: singleMode ? null : sourceStatesFor(form.sources, form.keywords[0]),
-        sourceTabs: singleMode ? null : {},
-        skipNonce: 0,
         platform,
         keywords: form.keywords,
         keywordIndex: 0,
@@ -225,31 +178,28 @@
         saveToPC: elements.saveToPCToggle.checked,
         stats: { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
         logs: [
-          popupLogEntry(`[popup] Start validation passed for ${singleMode ? form.sourceType : form.mode} source`),
+          popupLogEntry(`[popup] Start validation passed for ${form.sourceType} source`),
           { timestamp: new Date().toISOString(), platform, level: 'info', message: `Run created. First keyword: ${form.keywords[0]}`, details: '' }
         ],
         createdAt: new Date().toISOString()
       };
-      const secrets = collectCredentials(form);
+      const secrets = form.sourceType === 'social' ? {
+        [platform]: { username: elements.authUsername.value.trim(), password: elements.authPassword.value }
+      } : {};
       await app.storage.initialize(state, secrets);
       render(state);
 
-      if (!singleMode) {
-        const response = await chrome.runtime.sendMessage({ action: 'multi:start', runId, credentials: secrets });
-        if (!response?.success) throw new Error(response?.error || 'Multi scrape controller did not acknowledge Start');
+      const target = platformTarget(platform);
+      let currentHost = '';
+      try { currentHost = new URL(tab.url).hostname; } catch (error) {}
+      if (!currentHost.endsWith(target.domain)) {
+        await chrome.tabs.update(tab.id, { url: target.url });
       } else {
-        const target = platformTarget(platform);
-        let currentHost = '';
-        try { currentHost = new URL(tab.url).hostname; } catch (error) {}
-        if (!currentHost.endsWith(target.domain)) {
-          await chrome.tabs.update(tab.id, { url: target.url });
-        } else {
-          try {
-            const response = await chrome.tabs.sendMessage(tab.id, { action: 'scraper:start', runId, credentials: secrets });
-            if (!response?.success) throw new Error('Content script did not acknowledge Start');
-          } catch (error) {
-            await chrome.tabs.reload(tab.id);
-          }
+        try {
+          const response = await chrome.tabs.sendMessage(tab.id, { action: 'scraper:start', runId, credentials: secrets });
+          if (!response?.success) throw new Error('Content script did not acknowledge Start');
+        } catch (error) {
+          await chrome.tabs.reload(tab.id);
         }
       }
     } catch (error) {
@@ -284,7 +234,6 @@
     }
   });
 
-  elements.scrapingMode.addEventListener('change', () => updateSourceUi('change'));
   elements.platform.addEventListener('change', () => updateSourceUi('change'));
   elements.limitCountToggle.addEventListener('change', () => { elements.count.disabled = !elements.limitCountToggle.checked; });
   elements.dateLimitToggle.addEventListener('change', () => {
@@ -320,7 +269,6 @@
   });
 
   elements.platform.value = '';
-  elements.scrapingMode.value = app.utils.SCRAPING_MODES.single;
   selectedSource = null;
   elements.sendToServerToggle.checked = false;
   applyTranslations();
