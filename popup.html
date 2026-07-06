@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="az">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -35,23 +35,23 @@
 </head>
 <body>
   <header>
-    <h1>Multi-platform scraper</h1>
-    <select id="langSelect" aria-label="Language" style="width:72px">
-      <option value="ru">RU</option>
+    <h1>Çoxplatformalı toplayıcı</h1>
+    <select id="langSelect" aria-label="Dil" style="width:72px" hidden>
+      <option value="ru">AZ</option>
       <option value="az">AZ</option>
     </select>
   </header>
 
-  <label for="platform" data-i18n="source">Источник</label>
+  <label for="platform" data-i18n="source">Mənbə</label>
   <select id="platform">
-    <option value="" selected data-i18n="selectSource">Выберите источник</option>
-    <optgroup label="Соцсети">
+    <option value="" selected data-i18n="selectSource">Mənbə seçin</option>
+    <optgroup label="Sosial şəbəkələr">
       <option value="twitter">X (Twitter)</option>
       <option value="facebook">Facebook</option>
       <option value="instagram">Instagram</option>
       <option value="tiktok">TikTok</option>
     </optgroup>
-    <optgroup label="Новостные сайты">
+    <optgroup label="Xəbər saytları">
       <option value="oxu.az">Oxu.az</option>
       <option value="media.az">Media.az</option>
       <option value="1news.az">1news.az</option>
@@ -63,42 +63,42 @@
     </optgroup>
   </select>
 
-  <div id="languageWarning" class="language-warning" data-i18n="languageWarning" role="note">⚠️ Этот сайт не поддерживает азербайджанский язык. Используйте ключевые слова на русском языке.</div>
+  <div id="languageWarning" class="language-warning" data-i18n="languageWarning" role="note">⚠️ Bu sayt Azərbaycan dilini dəstəkləmir. Açar sözləri rus dilində daxil edin.</div>
 
-  <label for="keywords" data-i18n="keywords">Ключевые слова, каждое с новой строки</label>
+  <label for="keywords" data-i18n="keywords">Açar sözlər, hər yeni sətir yeni açar sözdür</label>
   <textarea id="keywords" placeholder="Messi&#10;FIFA"></textarea>
 
-  <label class="check"><input type="checkbox" id="limitCountToggle" checked><span data-i18n="maxPosts">Ограничить количество постов на слово</span></label>
+  <label class="check"><input type="checkbox" id="limitCountToggle" checked><span data-i18n="maxPosts">Hər söz üçün post sayını məhdudlaşdır</span></label>
   <input type="number" id="count" value="10" min="1" step="1">
 
-  <label class="check"><input type="checkbox" id="infiniteLoopToggle"><span data-i18n="infiniteLoop">Бесконечный сбор</span></label>
-  <label class="check"><input type="checkbox" id="dateLimitToggle"><span data-i18n="dateLimit">Не собирать посты старше даты</span></label>
+  <label class="check"><input type="checkbox" id="infiniteLoopToggle"><span data-i18n="infiniteLoop">Limitsiz toplama</span></label>
+  <label class="check"><input type="checkbox" id="dateLimitToggle"><span data-i18n="dateLimit">Göstərilən tarixdən köhnə postları toplama</span></label>
   <div class="date-control">
     <input type="text" id="dateLimit" placeholder="DD/MM/YYYY" inputmode="numeric" maxlength="10" autocomplete="off" disabled>
-    <input type="date" id="datePicker" aria-label="Выбрать дату в календаре" title="Выбрать дату в календаре" disabled>
+    <input type="date" id="datePicker" aria-label="Tarixi təqvimdə seç" title="Tarixi təqvimdə seç" disabled>
   </div>
 
-  <label class="check"><input type="checkbox" id="sendToServerToggle"><span data-i18n="sendToServer">Отправлять посты на сервер</span></label>
-  <label class="check"><input type="checkbox" id="saveToPCToggle" checked><span data-i18n="saveToPC">Сохранять результаты в JSONL на ПК</span></label>
+  <label class="check"><input type="checkbox" id="sendToServerToggle"><span data-i18n="sendToServer">Postları serverə göndər</span></label>
+  <label class="check"><input type="checkbox" id="saveToPCToggle" checked><span data-i18n="saveToPC">Nəticələri JSONL faylında saxla</span></label>
 
   <section id="authFields" class="auth" hidden>
-    <div class="muted" data-i18n="auth">Данные входа используются только в текущей сессии браузера</div>
-    <label for="authUsername" data-i18n="username">Логин или email</label>
+    <div class="muted" data-i18n="auth">Giriş məlumatları yalnız cari brauzer sessiyasında istifadə olunur</div>
+    <label for="authUsername" data-i18n="username">Login və ya email</label>
     <input type="text" id="authUsername" autocomplete="off">
-    <label for="authPassword" data-i18n="password">Пароль</label>
+    <label for="authPassword" data-i18n="password">Şifrə</label>
     <input type="password" id="authPassword" autocomplete="new-password">
   </section>
 
   <div id="error" role="alert"></div>
-  <div id="status" data-i18n="ready">Готов к запуску</div>
+  <div id="status" data-i18n="ready">Başlamağa hazırdır</div>
 
   <div class="actions">
-    <button id="start" data-i18n="start">Начать сбор</button>
-    <button id="stop" data-i18n="stop" hidden>Остановить</button>
-    <button id="skip" data-i18n="skip" hidden>Следующее слово</button>
+    <button id="start" data-i18n="start">Başlat</button>
+    <button id="stop" data-i18n="stop" hidden>Dayandır</button>
+    <button id="skip" data-i18n="skip" hidden>Cari sözü keç</button>
   </div>
 
-  <label for="logs" data-i18n="logs">Логи</label>
+  <label for="logs" data-i18n="logs">Loqlar</label>
   <div id="logs"></div>
 
   <script src="core/namespace.js"></script>
