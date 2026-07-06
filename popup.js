@@ -1,21 +1,33 @@
 (function initializePopup(app) {
   'use strict';
 
+  const azTexts = {
+    socialNetwork: 'Sosial şəbəkə',
+    source: 'Mənbə',
+    selectSource: 'Mənbə seçin',
+    keywords: 'Açar sözlər, hər yeni sətir yeni açar sözdür',
+    maxPosts: 'Hər söz üçün post sayını məhdudlaşdır',
+    infiniteLoop: 'Limitsiz toplama',
+    dateLimit: 'Göstərilən tarixdən köhnə postları toplama',
+    sendToServer: 'Postları serverə göndər',
+    saveToPC: 'Nəticələri JSONL faylında saxla',
+    auth: 'Giriş məlumatları yalnız cari brauzer sessiyasında istifadə olunur',
+    username: 'Login və ya email',
+    password: 'Şifrə',
+    ready: 'Başlamağa hazırdır',
+    start: 'Başlat',
+    stop: 'Dayandır',
+    skip: 'Cari sözü keç',
+    logs: 'Loqlar',
+    stopped: 'Dayandırılıb',
+    completed: 'Tamamlandı',
+    running: 'İcra olunur',
+    languageWarning: '⚠️ Bu sayt Azərbaycan dilini dəstəkləmir. Açar sözləri rus dilində daxil edin.'
+  };
+
   const translations = {
-    ru: {
-      socialNetwork: 'Социальная сеть', source: 'Источник', selectSource: 'Выберите источник', keywords: 'Ключевые слова, каждое с новой строки', maxPosts: 'Ограничить количество постов на слово',
-      infiniteLoop: 'Бесконечный сбор', dateLimit: 'Не собирать посты старше даты', sendToServer: 'Отправлять посты на сервер',
-      saveToPC: 'Сохранять результаты в JSONL на ПК', auth: 'Данные входа используются только в текущей сессии браузера',
-      username: 'Логин или email', password: 'Пароль', ready: 'Готов к запуску', start: 'Начать сбор', stop: 'Остановить',
-      skip: 'Следующее слово', logs: 'Логи', stopped: 'Остановлено', completed: 'Завершено', running: 'Выполняется'
-    },
-    az: {
-      socialNetwork: 'Sosial şəbəkə', source: 'Mənbə', selectSource: 'Mənbə seçin', keywords: 'Açar sözlər, hər biri yeni sətirdə', maxPosts: 'Hər söz üçün post sayını məhdudlaşdır',
-      infiniteLoop: 'Sonsuz toplama', dateLimit: 'Bu tarixdən köhnə postları toplama', sendToServer: 'Postları serverə göndər',
-      saveToPC: 'Nəticələri JSONL kimi kompüterə yaz', auth: 'Giriş məlumatları yalnız cari brauzer sessiyasında istifadə olunur',
-      username: 'Login və ya email', password: 'Şifrə', ready: 'Başlamağa hazırdır', start: 'Toplamağa başla', stop: 'Dayandır',
-      skip: 'Növbəti söz', logs: 'Loqlar', stopped: 'Dayandırılıb', completed: 'Tamamlandı', running: 'İcra olunur'
-    }
+    ru: azTexts,
+    az: azTexts
   };
 
   const elements = Object.fromEntries([
@@ -25,7 +37,8 @@
   const SOCIAL_SOURCES = new Set(['twitter', 'instagram', 'facebook', 'tiktok']);
   const NEWS_SOURCES = new Set(['oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']);
   const RUSSIAN_ONLY_NEWS_SOURCES = ['media.az', 'haqqin.az', 'caliber.az'];
-  let language = localStorage.getItem('scraperLanguage') || 'ru';
+  const SOURCE_TYPE_LABELS = { none: 'seçilməyib', social: 'sosial', news: 'xəbər', unknown: 'naməlum' };
+  let language = localStorage.getItem('scraperLanguage') || 'az';
   let currentState = null;
   let selectedSource = null;
   const popupLogs = [];
@@ -76,10 +89,10 @@
     elements.languageWarning.style.display = shouldShowWarning ? 'block' : 'none';
     if (!showLogin) showError();
     if (reason === 'change') {
-      debugPopup(`[popup] Source changed: ${selectedSource || 'none'}`);
-      debugPopup(`[popup] Source type: ${type}`);
-      debugPopup(showLogin ? '[popup] Login section shown' : '[popup] Login section hidden');
-      debugPopup(shouldShowWarning ? '[popup] Language warning shown' : '[popup] Language warning hidden');
+      debugPopup(`[popup] Mənbə dəyişdi: ${selectedSource || 'seçilməyib'}`);
+      debugPopup(`[popup] Mənbə tipi: ${SOURCE_TYPE_LABELS[type] || type}`);
+      debugPopup(showLogin ? '[popup] Giriş bölməsi göstərildi' : '[popup] Giriş bölməsi gizlədildi');
+      debugPopup(shouldShowWarning ? '[popup] Dil xəbərdarlığı göstərildi' : '[popup] Dil xəbərdarlığı gizlədildi');
     }
     return { source: selectedSource, type };
   }
@@ -117,21 +130,21 @@
   function validateForm() {
     const source = elements.platform.value || '';
     const type = sourceType(source);
-    if (!source) throw new Error(language === 'ru' ? 'Выберите источник для сбора' : 'Toplamaq üçün mənbə seçin');
-    if (type === 'unknown') throw new Error(`Unsupported source: ${source}`);
+    if (!source) throw new Error('Toplama mənbəyini seçin');
+    if (type === 'unknown') throw new Error(`Dəstəklənməyən mənbə: ${source}`);
     const keywords = elements.keywords.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-    if (!keywords.length) throw new Error(language === 'ru' ? 'Введите хотя бы одно ключевое слово.' : 'Ən azı bir açar söz daxil edin.');
+    if (!keywords.length) throw new Error('Ən azı bir açar söz daxil edin.');
     let targetCount = -1;
     if (elements.limitCountToggle.checked) {
       targetCount = Number(elements.count.value);
-      if (!Number.isInteger(targetCount) || targetCount < 1) throw new Error(language === 'ru' ? 'Количество постов должно быть целым числом больше нуля.' : 'Post sayı sıfırdan böyük tam ədəd olmalıdır.');
+      if (!Number.isInteger(targetCount) || targetCount < 1) throw new Error('Post sayı sıfırdan böyük tam ədəd olmalıdır.');
     }
     if (elements.dateLimitToggle.checked && !elements.dateLimit.value.trim()) {
-      throw new Error(language === 'ru' ? 'Выберите или введите дату в формате DD/MM/YYYY.' : 'Tarixi seçin və ya DD/MM/YYYY formatında daxil edin.');
+      throw new Error('Tarixi seçin və ya DD/MM/YYYY formatında daxil edin.');
     }
     const parsedDate = elements.dateLimitToggle.checked ? app.utils.parseUserDate(elements.dateLimit.value) : { value: null, error: null };
     if (parsedDate.error) throw new Error(parsedDate.error);
-    debugPopup(`[popup] Start validation passed for ${type} source`);
+    debugPopup(`[popup] Başlatma yoxlaması keçdi: ${SOURCE_TYPE_LABELS[type] || type}`);
     return { source, sourceType: type, keywords, targetCount, dateLimit: parsedDate.value };
   }
 
@@ -152,7 +165,7 @@
 
   async function activeTab() {
     const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    if (!tabs[0]?.id) throw new Error(language === 'ru' ? 'Не найдена активная вкладка.' : 'Aktiv tab tapılmadı.');
+    if (!tabs[0]?.id) throw new Error('Aktiv tab tapılmadı.');
     return tabs[0];
   }
 
@@ -182,8 +195,8 @@
         saveToPC: elements.saveToPCToggle.checked,
         stats: { currentKeyword: 0, total: 0, duplicates: 0, errors: 0 },
         logs: [
-          popupLogEntry(`[popup] Start validation passed for ${form.sourceType} source`),
-          { timestamp: new Date().toISOString(), platform, level: 'info', message: `Run created. First keyword: ${form.keywords[0]}`, details: '' }
+          popupLogEntry(`[popup] Başlatma yoxlaması keçdi: ${SOURCE_TYPE_LABELS[form.sourceType] || form.sourceType}`),
+          { timestamp: new Date().toISOString(), platform, level: 'info', message: `Toplama yaradıldı. İlk açar söz: ${form.keywords[0]}`, details: '' }
         ],
         createdAt: new Date().toISOString()
       };
@@ -201,7 +214,7 @@
       } else {
         try {
           const response = await chrome.tabs.sendMessage(tab.id, { action: 'scraper:start', runId, credentials: secrets });
-          if (!response?.success) throw new Error('Content script did not acknowledge Start');
+          if (!response?.success) throw new Error('Content script Start əmrini təsdiqləmədi');
         } catch (error) {
           await chrome.tabs.reload(tab.id);
         }
@@ -276,7 +289,7 @@
   selectedSource = null;
   elements.sendToServerToggle.checked = false;
   applyTranslations();
-  debugPopup('[popup] sendToServer default: false');
+  debugPopup('[popup] Serverə göndərmə varsayılan olaraq bağlıdır');
   updateSourceUi();
   app.storage.getState().then(render).catch((error) => showError(error.message));
 })(globalThis.ScraperApp);

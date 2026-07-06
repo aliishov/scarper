@@ -98,13 +98,13 @@
     const text = String(value || '').trim();
     if (!text) return { value: null, error: null };
     const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (!match) return { value: null, error: 'Используйте формат DD/MM/YYYY.' };
+    if (!match) return { value: null, error: 'DD/MM/YYYY formatından istifadə edin.' };
     const day = Number(match[1]);
     const month = Number(match[2]);
     const year = Number(match[3]);
     const date = new Date(year, month - 1, day);
     if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-      return { value: null, error: 'Указана несуществующая дата.' };
+      return { value: null, error: 'Belə bir tarix mövcud deyil.' };
     }
     return { value: `${match[3]}-${match[2]}-${match[1]}`, error: null };
   }
