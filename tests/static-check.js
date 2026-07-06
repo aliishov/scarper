@@ -64,8 +64,16 @@ assert.match(popupHtml, /<optgroup label="[^"]*">[\s\S]*oxu\.az[\s\S]*media\.az[
 assert.match(popupHtml, /id="sendToServerToggle"/);
 assert.doesNotMatch(popupHtml, /id="sendToServerToggle"[^>]*checked/);
 assert.match(popupHtml, /<section id="authFields" class="auth" hidden>/);
+assert.match(popupHtml, /id="languageWarning" class="language-warning"/);
+assert.match(popupHtml, /Этот сайт не поддерживает азербайджанский язык/);
+assert.match(popupHtml, /\.language-warning \{[^}]*#fffbeb/s);
+assert.match(popupHtml, /\.language-warning \{[^}]*#f59e0b/s);
+assert.match(popupHtml, /\.language-warning \{[^}]*#92400e/s);
 assert.match(popupSource, /const SOCIAL_SOURCES = new Set\(\['twitter', 'instagram', 'facebook', 'tiktok'\]\)/);
 assert.match(popupSource, /const NEWS_SOURCES = new Set\(\['oxu\.az', 'media\.az', '1news\.az', 'haqqin\.az', 'caliber\.az', 'qafqazinfo\.az', 'lent\.az', 'baku\.ws'\]\)/);
+assert.match(popupSource, /const RUSSIAN_ONLY_NEWS_SOURCES = \['media\.az', 'haqqin\.az', 'caliber\.az'\]/);
+assert.match(popupSource, /RUSSIAN_ONLY_NEWS_SOURCES\.includes\(selectedSource\)/);
+assert.match(popupSource, /elements\.languageWarning\.style\.display = shouldShowWarning \? 'block' : 'none'/);
 assert.match(popupSource, /let selectedSource = null/);
 assert.match(popupSource, /elements\.platform\.value = ''/);
 assert.match(popupSource, /elements\.sendToServerToggle\.checked = false/);

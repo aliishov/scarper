@@ -19,11 +19,12 @@
   };
 
   const elements = Object.fromEntries([
-    'langSelect', 'platform', 'keywords', 'limitCountToggle', 'count', 'infiniteLoopToggle', 'dateLimitToggle', 'dateLimit',
+    'langSelect', 'platform', 'languageWarning', 'keywords', 'limitCountToggle', 'count', 'infiniteLoopToggle', 'dateLimitToggle', 'dateLimit',
     'datePicker', 'sendToServerToggle', 'saveToPCToggle', 'authFields', 'authUsername', 'authPassword', 'error', 'status', 'start', 'stop', 'skip', 'logs'
   ].map((id) => [id, document.getElementById(id)]));
   const SOCIAL_SOURCES = new Set(['twitter', 'instagram', 'facebook', 'tiktok']);
   const NEWS_SOURCES = new Set(['oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']);
+  const RUSSIAN_ONLY_NEWS_SOURCES = ['media.az', 'haqqin.az', 'caliber.az'];
   let language = localStorage.getItem('scraperLanguage') || 'ru';
   let currentState = null;
   let selectedSource = null;
@@ -70,12 +71,15 @@
     selectedSource = elements.platform.value || null;
     const type = sourceType(selectedSource);
     const showLogin = type === 'social';
+    const shouldShowWarning = RUSSIAN_ONLY_NEWS_SOURCES.includes(selectedSource);
     elements.authFields.hidden = !showLogin;
+    elements.languageWarning.style.display = shouldShowWarning ? 'block' : 'none';
     if (!showLogin) showError();
     if (reason === 'change') {
       debugPopup(`[popup] Source changed: ${selectedSource || 'none'}`);
       debugPopup(`[popup] Source type: ${type}`);
       debugPopup(showLogin ? '[popup] Login section shown' : '[popup] Login section hidden');
+      debugPopup(shouldShowWarning ? '[popup] Language warning shown' : '[popup] Language warning hidden');
     }
     return { source: selectedSource, type };
   }
