@@ -7,7 +7,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 const scripts = manifest.content_scripts[0].js;
-for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok']) {
+for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'threads']) {
   assert.ok(scripts.includes(`scrapers/${platform}.js`), `${platform} scraper must be a separate content module`);
 }
 assert.ok(scripts.includes('scrapers/oxu.js'), 'oxu.az scraper must be a separate content module');
@@ -35,6 +35,8 @@ assert.ok(manifest.host_permissions.includes('*://lent.az/*'), 'lent.az host per
 assert.ok(manifest.content_scripts[0].matches.includes('*://lent.az/*'), 'lent.az content script match is required');
 assert.ok(manifest.host_permissions.includes('*://baku.ws/*'), 'baku.ws host permission is required');
 assert.ok(manifest.content_scripts[0].matches.includes('*://baku.ws/*'), 'baku.ws content script match is required');
+assert.ok(manifest.host_permissions.includes('*://www.threads.com/*'), 'Threads host permission is required');
+assert.ok(manifest.content_scripts[0].matches.includes('*://www.threads.com/*'), 'Threads content script match is required');
 
 const sourceFiles = [];
 function walk(directory) {
@@ -59,7 +61,7 @@ assert.equal(/DOMContentLoaded[^\n]+run|setTimeout\([^\n]+runStateMachine/.test(
 const popupHtml = fs.readFileSync(path.join(root, 'popup.html'), 'utf8');
 const popupSource = fs.readFileSync(path.join(root, 'popup.js'), 'utf8');
 assert.match(popupHtml, /<option value="" selected data-i18n="selectSource">/);
-assert.match(popupHtml, /<optgroup label="[^"]*">[\s\S]*twitter[\s\S]*facebook[\s\S]*instagram[\s\S]*tiktok/);
+assert.match(popupHtml, /<optgroup label="[^"]*">[\s\S]*twitter[\s\S]*facebook[\s\S]*instagram[\s\S]*tiktok[\s\S]*threads/);
 assert.match(popupHtml, /<optgroup label="[^"]*">[\s\S]*oxu\.az[\s\S]*media\.az[\s\S]*1news\.az[\s\S]*haqqin\.az[\s\S]*caliber\.az[\s\S]*qafqazinfo\.az[\s\S]*lent\.az[\s\S]*baku\.ws/);
 assert.match(popupHtml, /id="sendToServerToggle"/);
 assert.doesNotMatch(popupHtml, /id="sendToServerToggle"[^>]*checked/);
@@ -73,7 +75,7 @@ assert.match(popupHtml, /\.language-warning \{[^}]*#f59e0b/s);
 assert.match(popupHtml, /\.language-warning \{[^}]*#92400e/s);
 assert.match(popupHtml, /<html lang="az">/);
 assert.match(popupHtml, /aria-label="Dil"/);
-assert.match(popupSource, /const SOCIAL_SOURCES = new Set\(\['twitter', 'instagram', 'facebook', 'tiktok'\]\)/);
+assert.match(popupSource, /const SOCIAL_SOURCES = new Set\(\['twitter', 'instagram', 'facebook', 'tiktok', 'threads'\]\)/);
 assert.match(popupSource, /const NEWS_SOURCES = new Set\(\['oxu\.az', 'media\.az', '1news\.az', 'haqqin\.az', 'caliber\.az', 'qafqazinfo\.az', 'lent\.az', 'baku\.ws'\]\)/);
 assert.match(popupSource, /const RUSSIAN_ONLY_NEWS_SOURCES = \['media\.az', 'haqqin\.az', 'caliber\.az'\]/);
 assert.match(popupSource, /RUSSIAN_ONLY_NEWS_SOURCES\.includes\(selectedSource\)/);
@@ -110,6 +112,30 @@ assert.match(twitterSource, /From date selected: \$\{dateLimit\.iso\}/);
 assert.match(twitterSource, /Advanced search UI failed; using since: fallback URL/);
 assert.match(twitterSource, /since:\$\{parsed\.iso\}/);
 assert.match(twitterSource, /encodeURIComponent\(q\)/);
+const threadsSource = fs.readFileSync(path.join(root, 'scrapers', 'threads.js'), 'utf8');
+assert.match(threadsSource, /source: 'threads'/);
+assert.match(threadsSource, /baseUrl: 'https:\/\/www\.threads\.com\/'/);
+assert.match(threadsSource, /a\[href="\/search"\]/);
+assert.match(threadsSource, /input\[type="search"\]/);
+assert.match(threadsSource, /after_date/);
+assert.match(threadsSource, /filter', 'recent'/);
+assert.match(threadsSource, /\[data-pressable-container="true"\]/);
+assert.match(threadsSource, /a\[href\*="\/post\/"\]/);
+assert.match(threadsSource, /time\[datetime\]/);
+assert.match(threadsSource, /Reply post detected/);
+assert.match(threadsSource, /Nested quoted post ignored/);
+assert.match(threadsSource, /nestedPostRoots\(root, postUrl\)/);
+assert.match(threadsSource, /belongsToPrimaryPost\(element, root, nestedRoots\)/);
+assert.match(threadsSource, /video\.currentSrc/);
+assert.match(threadsSource, /source\[src\]/);
+assert.match(threadsSource, /Date filter UI attempt \$\{attempt\}\/3/);
+assert.match(threadsSource, /const descriptions = \[cell, \.\.\.Array\.from\(cell\.querySelectorAll\('\*'\)\)\]/);
+assert.match(threadsSource, /element\.textContent/);
+assert.match(threadsSource, /Recent could not be confirmed after UI and URL fallbacks/);
+assert.match(threadsSource, /ctx\.token\.throwIfCancelled\(\)/);
+assert.match(threadsSource, /app\.scrapers\[SOURCE_CONFIG\.source\] = new ThreadsScraper\(\)/);
+assert.doesNotMatch(threadsSource, /x1i10hfl|x1qjc9v5|x78zum5/);
+assert.doesNotMatch(threadsSource, /fetch\(/);
 const oxuSource = fs.readFileSync(path.join(root, 'scrapers', 'oxu.js'), 'utf8');
 assert.match(oxuSource, /source: 'oxu\.az'/);
 assert.match(oxuSource, /\.custom-navbar-search-toggle/);
