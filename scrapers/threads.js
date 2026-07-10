@@ -137,7 +137,8 @@
   }
 
   function monthIndexFromText(value) {
-    const tokens = app.utils.normalizeText(value).split(/[^\p{L}]+/u).filter(Boolean);
+    const normalized = app.utils.normalizeText(value).normalize('NFD').replace(/\u0307/g, '');
+    const tokens = normalized.split(/[^\p{L}]+/u).filter(Boolean);
     return MONTH_ALIASES.findIndex((aliases) => aliases.some((alias) => tokens.includes(alias)));
   }
 
@@ -415,8 +416,12 @@
     targetCalendarCell(grid, dateLimit) {
       return this.allVisible('[role="gridcell"]', grid).find((cell) => {
         if (cell.getAttribute('aria-disabled') === 'true') return false;
-        const value = `${cell.getAttribute('aria-label') || ''} ${this.text(cell)}`;
-        return threadsDatePartsFromText(value)?.iso === dateLimit.iso;
+        const descriptions = [cell, ...Array.from(cell.querySelectorAll('*'))].flatMap((element) => [
+          element.getAttribute?.('aria-label'),
+          element.getAttribute?.('title'),
+          element.textContent
+        ]).filter(Boolean);
+        return descriptions.some((value) => threadsDatePartsFromText(value)?.iso === dateLimit.iso);
       }) || null;
     }
 
@@ -714,14 +719,33 @@
       return Array.from(unique.values());
     }
 
+    nestedPostRoots(root, postUrl) {
+      const primaryUrl = getCanonicalThreadsPostUrl(postUrl);
+      const roots = this.exactPermalinkLinks(root)
+        .filter((link) => getCanonicalThreadsPostUrl(link.href || link.getAttribute('href')) !== primaryUrl)
+        .map((link) => this.findThreadsPostRoot(link))
+        .filter((nested) => nested && nested !== root && root.contains(nested));
+      return Array.from(new Set(roots));
+    }
+
+    belongsToPrimaryPost(element, root, nestedRoots) {
+      return this.belongsToRoot(element, root) && !nestedRoots.some((nested) => nested.contains(element));
+    }
+
     ownText(root) {
       const clone = root.cloneNode(true);
       clone.querySelectorAll('[data-pressable-container="true"]').forEach((nested) => nested.remove());
       return this.text(clone);
     }
 
-    isThreadsReply(root) {
-      return isThreadsReplyText(this.ownText(root));
+    isThreadsReply(root, postUrl = '') {
+      const nestedRoots = this.nestedPostRoots(root, postUrl);
+      const marker = this.allVisible('span, div', root).find((element) => {
+        if (!this.belongsToPrimaryPost(element, root, nestedRoots)) return false;
+        const value = this.text(element);
+        return value.length <= 160 && isThreadsReplyText(value);
+      });
+      return !!marker || (!nestedRoots.length && isThreadsReplyText(this.ownText(root)));
     }
 
     primaryPermalink(root, postUrl = '') {
@@ -738,8 +762,9 @@
 
     parsePostText(root, postUrl) {
       const permalink = this.primaryPermalink(root, postUrl);
+      const nestedRoots = this.nestedPostRoots(root, postUrl);
       const candidates = this.allVisible('span[dir="auto"], div[dir="auto"]', root).filter((element) => {
-        if (!this.belongsToRoot(element, root)) return false;
+        if (!this.belongsToPrimaryPost(element, root, nestedRoots)) return false;
         if (element.closest('time, button, [role="button"], [role="menu"], [role="dialog"]')) return false;
         if (permalink && !(permalink.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)) return false;
         const link = element.closest('a[href]');
@@ -765,8 +790,8 @@
       return segments.join('\n').trim();
     }
 
-    imageIsContent(image, root) {
-      if (!this.belongsToRoot(image, root)) return false;
+    imageIsContent(image, root, nestedRoots) {
+      if (!this.belongsToPrimaryPost(image, root, nestedRoots)) return false;
       const url = image.currentSrc || image.src || image.getAttribute('src') || '';
       if (!/^https?:\/\//i.test(url)) return false;
       const alt = app.utils.normalizeText(image.getAttribute('alt'));
@@ -783,13 +808,14 @@
       return renderedLargeEnough && width >= 120 && height >= 120;
     }
 
-    collectMediaUrls(root) {
+    collectMediaUrls(root, postUrl) {
+      const nestedRoots = this.nestedPostRoots(root, postUrl);
       const values = [];
       for (const image of root.querySelectorAll('img[src]')) {
-        if (this.imageIsContent(image, root)) values.push(image.currentSrc || image.src || image.getAttribute('src'));
+        if (this.imageIsContent(image, root, nestedRoots)) values.push(image.currentSrc || image.src || image.getAttribute('src'));
       }
       for (const video of root.querySelectorAll('video')) {
-        if (!this.belongsToRoot(video, root)) continue;
+        if (!this.belongsToPrimaryPost(video, root, nestedRoots)) continue;
         values.push(video.currentSrc, video.src, video.getAttribute('src'));
         for (const source of video.querySelectorAll('source[src]')) values.push(source.src || source.getAttribute('src'));
         values.push(video.poster || video.getAttribute('poster'));
@@ -835,10 +861,10 @@
       const canonicalUrl = getCanonicalThreadsPostUrl(postUrl || this.primaryPermalink(root)?.href);
       if (!canonicalUrl) return null;
       if (this.isAdvertisement(root)) return { advertisement: true, postUrl: canonicalUrl };
-      if (this.isThreadsReply(root)) return { reply: true, postUrl: canonicalUrl };
+      if (this.isThreadsReply(root, canonicalUrl)) return { reply: true, postUrl: canonicalUrl };
       const author = getThreadsAuthorFromUrl(canonicalUrl);
       const postDate = this.parsePostDate(root, canonicalUrl);
-      const mediaUrls = this.collectMediaUrls(root);
+      const mediaUrls = this.collectMediaUrls(root, canonicalUrl);
       return {
         source: SOURCE_CONFIG.source,
         postDate,
@@ -890,7 +916,7 @@
             await ctx.logger.info('[threads] Nested quoted post ignored', candidate.postUrl);
             continue;
           }
-          if (this.isThreadsReply(candidate.root)) {
+          if (this.isThreadsReply(candidate.root, candidate.postUrl)) {
             await ctx.logger.info('[threads] Reply post detected', candidate.postUrl);
             await ctx.logger.info('[threads] Reply skipped', candidate.postUrl);
             continue;
