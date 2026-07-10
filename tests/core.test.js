@@ -33,6 +33,7 @@ for (const file of [
   'scrapers/facebook.js',
   'scrapers/instagram.js',
   'scrapers/tiktok.js',
+  'scrapers/threads.js',
   'scrapers/oxu.js',
   'scrapers/media.js',
   'scrapers/one-news.js',
@@ -73,6 +74,80 @@ test('result filename follows source_result_DD_MM_YYYY.jsonl', () => {
   assert.equal(app.utils.buildFilename('qafqazinfo.az', new Date(2026, 5, 25)), 'qafqazinfo.az_result_25_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('lent.az', new Date(2026, 5, 25)), 'lent.az_result_25_06_2026.jsonl');
   assert.equal(app.utils.buildFilename('baku.ws', new Date(2026, 5, 25)), 'baku.ws_result_25_06_2026.jsonl');
+  assert.equal(app.utils.buildFilename('threads', new Date(2026, 6, 10)), 'threads_result_10_07_2026.jsonl');
+});
+
+test('Threads search URL supports keyword, after_date, and Recent', () => {
+  const basic = new URL(app.parsers.threadsSearchUrl('Məhkəmə'));
+  assert.equal(basic.origin, 'https://www.threads.com');
+  assert.equal(basic.pathname, '/search');
+  assert.equal(basic.searchParams.get('q'), 'Məhkəmə');
+  assert.equal(basic.searchParams.get('serp_type'), 'default');
+  assert.equal(basic.searchParams.has('after_date'), false);
+  assert.equal(basic.searchParams.has('filter'), false);
+
+  const filtered = new URL(app.parsers.threadsSearchUrl('Məhkəmə', '10/07/2026', true));
+  assert.equal(filtered.searchParams.get('after_date'), '2026-07-10');
+  assert.equal(filtered.searchParams.get('filter'), 'recent');
+  assert.deepEqual(app.parsers.threadsDateLimit('2026-07-10'), {
+    day: 10, month: 7, year: 2026, iso: '2026-07-10'
+  });
+  assert.equal(app.parsers.threadsDateLimit('31/02/2026'), null);
+});
+
+test('Threads canonical URL, author, and datetime extraction are stable', () => {
+  assert.equal(
+    app.parsers.threadsCanonicalPostUrl('https://threads.com/@uglyyy_678/post/ABC123/media?x=1'),
+    'https://www.threads.com/@uglyyy_678/post/ABC123'
+  );
+  assert.equal(app.parsers.threadsCanonicalPostUrl('/@uglyyy_678/post/ABC123?share=1'), 'https://www.threads.com/@uglyyy_678/post/ABC123');
+  assert.equal(app.parsers.threadsCanonicalPostUrl('https://example.com/@user/post/ABC123'), '');
+  assert.equal(app.parsers.threadsAuthorFromUrl('/@uglyyy_678/post/ABC123'), 'uglyyy_678');
+  assert.equal(app.parsers.threadsDatetime('2026-07-10T07:17:35.000Z'), '2026-07-10T07:17:35.000Z');
+  assert.equal(app.parsers.threadsDatetime('56 min.'), null);
+});
+
+test('Threads reply markers skip replies without rejecting independent posts', () => {
+  assert.equal(app.parsers.threadsReplyText('Replying to @person'), true);
+  assert.equal(app.parsers.threadsReplyText('В ответ @person'), true);
+  assert.equal(app.parsers.threadsReplyText('Cavab olaraq @person'), true);
+  assert.equal(app.parsers.threadsReplyText('Independent post text'), false);
+  assert.equal(app.parsers.threadsReplyText('A quote is not automatically a reply'), false);
+});
+
+test('Threads calendar parsing matches full localized dates', () => {
+  assert.deepEqual(app.parsers.threadsMonthYear('July 2026'), { month: 7, year: 2026 });
+  assert.deepEqual(app.parsers.threadsMonthYear('Июль 2026'), { month: 7, year: 2026 });
+  assert.deepEqual(app.parsers.threadsMonthYear('İyul 2026'), { month: 7, year: 2026 });
+  assert.deepEqual(app.parsers.threadsDateParts('Friday, July 10, 2026, selected'), {
+    month: 7, year: 2026, day: 10, iso: '2026-07-10'
+  });
+  assert.deepEqual(app.parsers.threadsDateParts('Пятница, 10 июля 2026 г.'), {
+    month: 7, year: 2026, day: 10, iso: '2026-07-10'
+  });
+  assert.equal(app.parsers.threadsDateParts('10'), null);
+});
+
+test('Threads media URLs are stable and deduplicated', () => {
+  assert.deepEqual(app.parsers.threadsMediaUrls([
+    'https://cdn.example/image.jpg',
+    'https://cdn.example/image.jpg',
+    'https://cdn.example/video.mp4',
+    'blob:https://www.threads.com/123',
+    'data:image/png;base64,abc'
+  ]), [
+    'https://cdn.example/image.jpg',
+    'https://cdn.example/video.mp4'
+  ]);
+});
+
+test('Threads nested candidates do not duplicate quoted posts', () => {
+  const innerRoot = { contains: () => false };
+  const outerRoot = { contains: (element) => element === innerRoot };
+  const outer = { root: outerRoot, postUrl: 'outer' };
+  const nested = { root: innerRoot, postUrl: 'nested' };
+  assert.equal(app.parsers.threadsCandidateNested(outer, [outer, nested]), false);
+  assert.equal(app.parsers.threadsCandidateNested(nested, [outer, nested]), true);
 });
 
 test('Facebook parses absolute tooltip date without replacing it with now', () => {
@@ -482,7 +557,7 @@ test('all platform scrapers implement the shared public contract', () => {
     'ensureReady', 'searchKeyword', 'scrapePosts', 'parsePost', 'expandPostText',
     'parsePostDate', 'shouldSkipPost', 'stop', 'cleanup'
   ];
-  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']) {
+  for (const platform of ['facebook', 'instagram', 'twitter', 'tiktok', 'threads', 'oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']) {
     for (const method of methods) {
       assert.equal(typeof app.scrapers[platform][method], 'function', `${platform}.${method} must exist`);
     }
