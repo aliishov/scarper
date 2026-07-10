@@ -34,7 +34,7 @@
     'langSelect', 'platform', 'languageWarning', 'keywords', 'limitCountToggle', 'count', 'infiniteLoopToggle', 'dateLimitToggle', 'dateLimit',
     'datePicker', 'sendToServerToggle', 'saveToPCToggle', 'authFields', 'authUsername', 'authPassword', 'error', 'status', 'start', 'stop', 'skip', 'logs'
   ].map((id) => [id, document.getElementById(id)]));
-  const SOCIAL_SOURCES = new Set(['twitter', 'instagram', 'facebook', 'tiktok']);
+  const SOCIAL_SOURCES = new Set(['twitter', 'instagram', 'facebook', 'tiktok', 'threads']);
   const NEWS_SOURCES = new Set(['oxu.az', 'media.az', '1news.az', 'haqqin.az', 'caliber.az', 'qafqazinfo.az', 'lent.az', 'baku.ws']);
   const RUSSIAN_ONLY_NEWS_SOURCES = ['media.az', 'haqqin.az', 'caliber.az'];
   const SOURCE_TYPE_LABELS = { none: 'seçilməyib', social: 'sosial', news: 'xəbər', unknown: 'naməlum' };
@@ -152,6 +152,7 @@
     if (platform === 'facebook') return { domain: 'facebook.com', url: 'https://www.facebook.com/' };
     if (platform === 'instagram') return { domain: 'instagram.com', url: 'https://www.instagram.com/' };
     if (platform === 'tiktok') return { domain: 'tiktok.com', url: 'https://www.tiktok.com/' };
+    if (platform === 'threads') return { domain: 'threads.com', url: 'https://www.threads.com/' };
     if (platform === 'oxu.az') return { domain: 'oxu.az', url: 'https://oxu.az/' };
     if (platform === 'media.az') return { domain: 'media.az', url: 'https://media.az/' };
     if (platform === '1news.az') return { domain: '1news.az', url: 'https://1news.az/az' };
